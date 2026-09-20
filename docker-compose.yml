@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  # Jev AI Orchestrator - Main automation logic
+  jev-ai:
+    build:
+      context: ./jev-ai
+      dockerfile: Dockerfile
+    container_name: jev-ai
+    restart: unless-stopped
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - MCP_TELEGRAM_URL=http://mcp-telegram:8765
+      - MCP_POLYMARKET_URL=http://mcp-polymarket:8766
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/polymarket
+      - MIN_TRADES_90D=${MIN_TRADES_90D:-20}
+      - MIN_LIFETIME_PNL=${MIN_LIFETIME_PNL:-10000}
+      - MIN_WIN_RATE=${MIN_WIN_RATE:-0.20}
+      - MAX_POSITIONS=${MAX_POSITIONS:-10}
+      - POSITION_SIZE_USDC=${POSITION_SIZE_USDC:-50}
+      - COPY_SELLS=${COPY_SELLS:-true}
+      - POLL_INTERVAL_SECS=${POLL_INTERVAL_SECS:-60}
+    depends_on:
+      - mcp-telegram
+      - mcp-polymarket
+      - postgres
+    networks:
+      - polymarket-net
+    volumes:
+      - ./jev-ai/logs:/app/logs
+      - ./jev-ai/config:/app/config
+
+  # MCP Server for Telegram
+  mcp-telegram:
+    build:
+      context: ./mcp-telegram
+      dockerfile: Dockerfile
+    container_name: mcp-telegram
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - MCP_SERVER_PORT=8765
+    ports:
+      - "8765:8765"
+    networks:
+      - polymarket-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MCP Server for Polymarket
+  mcp-polymarket:
+    build:
+      context: ./mcp-polymarket
+      dockerfile: Dockerfile
+    container_name: mcp-polymarket
+    restart: unless-stopped
+    environment:
+      - GAMMA_API_URL=https://gamma-api.polymarket.com
+      - GAMMA_REQUIRES_AUTH=false
+      - MCP_SERVER_PORT=8766
+    ports:
+      - "8766:8766"
+    networks:
+      - polymarket-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8766/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:17-alpine
+    container_name: polymarket-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=polymarket
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - polymarket-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus for Metrics
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: polymarket-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - polymarket-net
+    depends_on:
+      - jev-ai
+
+  # Grafana for Dashboards
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: polymarket-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    ports:
+      - "3000:3000"
+    networks:
+      - polymarket-net
+    depends_on:
+      - prometheus
+
+networks:
+  polymarket-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

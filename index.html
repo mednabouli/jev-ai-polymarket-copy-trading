@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Jev AI — Automated Polymarket copy trading. Track profitable whale wallets, automate signals, and receive Telegram alerts." />
+  <meta name="theme-color" content="#070b18" />
+  <title>Jev AI — Polymarket Copy Trading Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root { --bg:#070b18; --panel:#0d1428; --panel-2:#111b34; --line:rgba(173,195,255,.14); --muted:#92a0bd; --text:#f3f6ff; --cyan:#5fe3ff; --violet:#8f7cff; --green:#66e3a4; --orange:#ffb86a; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--text); background:radial-gradient(800px 420px at 80% -10%, rgba(94,79,255,.25), transparent 68%), radial-gradient(600px 420px at -10% 30%, rgba(0,209,255,.12), transparent 70%), var(--bg); font-family:Manrope,system-ui,sans-serif; }
+    .grid-bg { position:fixed; inset:0; pointer-events:none; opacity:.25; background-image:linear-gradient(rgba(137,165,255,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(137,165,255,.08) 1px,transparent 1px); background-size:48px 48px; mask-image:linear-gradient(to bottom,black,transparent 76%); }
+    .shell { position:relative; max-width:1180px; padding:0 24px; margin:auto; }
+    nav { height:76px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:11px; text-decoration:none; color:var(--text); font-weight:800; letter-spacing:-.6px; }
+    .mark { width:30px; height:30px; display:grid; place-items:center; color:#06121a; background:linear-gradient(135deg,var(--cyan),var(--violet)); border-radius:9px; font-family:"DM Mono",monospace; font-weight:700; }
+    .nav-links { display:flex; align-items:center; gap:24px; }
+    .nav-links a { color:var(--muted); font-size:14px; text-decoration:none; }
+    .nav-links a:hover { color:var(--text); }
+    .button { border:1px solid rgba(95,227,255,.45); border-radius:10px; padding:10px 15px; font-size:13px; font-weight:700; text-decoration:none; color:var(--text); background:rgba(95,227,255,.08); transition:.2s; }
+    .button:hover { transform:translateY(-2px); background:rgba(95,227,255,.16); }
+    .hero { min-height:640px; display:grid; grid-template-columns:1.04fr .96fr; align-items:center; gap:48px; padding:90px 0 70px; }
+    .eyebrow { display:inline-flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:100px; padding:8px 11px; color:#c5cff0; background:rgba(16,26,52,.6); font:12px "DM Mono",monospace; }
+    .pulse { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 5px rgba(102,227,164,.11); }
+    h1 { margin:20px 0; max-width:700px; font-size:clamp(42px,6vw,72px); line-height:1.04; letter-spacing:-3.2px; }
+    .grad { background:linear-gradient(95deg,var(--cyan),#b7b0ff 70%); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .lead { color:var(--muted); max-width:590px; line-height:1.75; font-size:17px; }
+    .hero-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:29px; }
+    .button.primary { border:0; color:#06121a; background:linear-gradient(100deg,var(--cyan),#8f7cff); padding:13px 18px; }
+    .button.secondary { padding:13px 18px; border-color:var(--line); background:rgba(255,255,255,.035); }
+    .proof { display:flex; gap:28px; margin-top:38px; }
+    .proof b { display:block; font:600 19px "DM Mono",monospace; color:var(--cyan); }
+    .proof span { color:var(--muted); font-size:12px; }
+    .terminal { overflow:hidden; border:1px solid rgba(143,124,255,.28); border-radius:18px; background:linear-gradient(145deg,rgba(20,32,63,.94),rgba(8,13,30,.94)); box-shadow:0 28px 70px rgba(0,0,0,.32); }
+    .terminal-head { display:flex; align-items:center; gap:6px; padding:15px 17px; border-bottom:1px solid var(--line); }
+    .dot { width:8px; height:8px; border-radius:50%; background:#ff6b75; }.dot:nth-child(2){background:#ffcb6b}.dot:nth-child(3){background:#66e3a4}
+    .term-title { margin-left:8px; color:var(--muted); font:12px "DM Mono",monospace; }
+    .terminal-body { padding:22px; font:13px/1.8 "DM Mono",monospace; }
+    .command { color:var(--cyan); }.muted { color:#7886a6; }.good { color:var(--green); }.violet { color:#b5aaff; }.orange { color:var(--orange); }
+    .trade { display:flex; justify-content:space-between; margin:15px 0; padding:13px; border:1px solid rgba(175,195,255,.1); border-radius:9px; background:rgba(255,255,255,.025); }.trade small{color:var(--muted)}
+    section { padding:80px 0; border-top:1px solid var(--line); }.kicker { color:var(--cyan); font:12px "DM Mono",monospace; text-transform:uppercase; letter-spacing:1.4px; }.section-title{margin:12px 0;letter-spacing:-1.3px;font-size:clamp(28px,4vw,43px)}.section-copy{color:var(--muted);max-width:650px;line-height:1.7}
+    .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:35px; }.card { padding:24px; min-height:205px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(145deg,rgba(17,27,52,.82),rgba(10,16,33,.72)); }.icon { font:23px "DM Mono",monospace; color:var(--cyan); }.card h3{margin:20px 0 9px;font-size:17px}.card p{color:var(--muted);font-size:14px;line-height:1.65;margin:0}
+    .steps { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-top:34px; }.step { position:relative; padding:21px; border-top:1px solid var(--cyan); background:rgba(13,20,40,.7); }.number { color:var(--violet); font:13px "DM Mono",monospace; }.step h3{font-size:16px;margin:14px 0 8px}.step p{color:var(--muted);font-size:13px;line-height:1.6;margin:0}
+    .stack { display:grid; grid-template-columns:1.25fr .75fr; gap:18px; margin-top:32px; }.code-panel,.stat-panel{padding:26px;border:1px solid var(--line);border-radius:15px;background:var(--panel)}.code-panel pre{margin:0;overflow:auto;color:#cbd6f6;font:13px/1.8 "DM Mono",monospace}.stat{display:flex;justify-content:space-between;padding:15px 0;border-bottom:1px solid var(--line)}.stat:last-child{border:0}.stat span{color:var(--muted);font-size:13px}.stat b{font:500 14px "DM Mono",monospace;color:var(--green)}
+    .cta { text-align:center; margin:80px 0; padding:65px 24px; border:1px solid rgba(95,227,255,.26); border-radius:20px; background:radial-gradient(circle at 50% 0,rgba(79,154,255,.15),transparent 55%),var(--panel); }.cta h2{font-size:clamp(28px,4vw,46px);letter-spacing:-1.8px;margin:0 0 12px}.cta p{color:var(--muted);margin:0 auto 26px;max-width:570px;line-height:1.7}
+    footer { padding:28px 0 42px; border-top:1px solid var(--line); display:flex; justify-content:space-between; color:var(--muted); font-size:13px; }footer a{color:var(--muted);text-decoration:none}
+    @media (max-width:820px){.nav-links{display:none}.hero,.stack{grid-template-columns:1fr}.hero{padding-top:60px}.cards{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.terminal{max-width:620px}.proof{gap:17px}footer{flex-direction:column;gap:10px}}
+    @media (max-width:460px){.shell{padding:0 17px}.steps{grid-template-columns:1fr}h1{letter-spacing:-2px}.proof{flex-wrap:wrap}}
+  </style>
+</head>
+<body>
+  <div class="grid-bg"></div>
+  <main class="shell">
+    <nav>
+      <a class="brand" href="#top"><span class="mark">J</span> Jev AI</a>
+      <div class="nav-links"><a href="#features">Features</a><a href="#workflow">Workflow</a><a href="#stack">Stack</a><a class="button" href="https://github.com/mednabouli/jev-ai-polymarket-copy-trading">GitHub ↗</a></div>
+    </nav>
+
+    <section class="hero" id="top">
+      <div>
+        <div class="eyebrow"><span class="pulse"></span> POLYMARKET INTELLIGENCE ENGINE</div>
+        <h1>Follow signal.<br><span class="grad">Automate discipline.</span></h1>
+        <p class="lead">Jev AI turns verified on-chain wallet activity into a controlled Polymarket copy-trading workflow—with profitable-wallet screening, real-time Telegram alerts, MCP tooling, and full observability.</p>
+        <div class="hero-actions"><a class="button primary" href="https://github.com/mednabouli/jev-ai-polymarket-copy-trading">Explore the repository</a><a class="button secondary" href="#workflow">See how it works ↓</a></div>
+        <div class="proof"><div><b>90d</b><span>Performance screening</span></div><div><b>24/7</b><span>Wallet monitoring</span></div><div><b>MCP</b><span>Agent-native control plane</span></div></div>
+      </div>
+      <div class="terminal" aria-label="Live copy trading dashboard preview">
+        <div class="terminal-head"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="term-title">jev-ai / whale-monitor</span></div>
+        <div class="terminal-body">
+          <div><span class="command">$</span> jev monitor --mode=paper</div>
+          <div class="muted">Scanning qualified wallet activity...</div>
+          <br>
+          <div class="good">✓ 8 wallets qualified by 90d filter</div>
+          <div class="good">✓ Telegram alert channel connected</div>
+          <div class="good">✓ MCP services healthy</div>
+          <div class="trade"><span><span class="violet">NEW SIGNAL</span><br><small>BTC above target · YES</small></span><span class="good">+$50.00</span></div>
+          <div class="trade"><span><span class="orange">WATCHING</span><br><small>Election outcome · NO</small></span><span class="muted">pending</span></div>
+          <div class="muted">Latency: 0.84s · Open positions: 3/10</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="kicker">Built for control</div><h2 class="section-title">Trading intelligence, not blind copying.</h2><p class="section-copy">The system is designed to filter activity first, make each decision observable, and preserve strict position controls as it monitors selected wallets.</p>
+      <div class="cards">
+        <article class="card"><div class="icon">01</div><h3>Wallet Quality Engine</h3><p>Ranks wallets with 90-day activity, realized PnL, trade count, win rate, category performance, and volume thresholds.</p></article>
+        <article class="card"><div class="icon">02</div><h3>MCP-Native Agents</h3><p>Local MCP servers expose Polymarket and Telegram capabilities to compatible agent workflows and Claude Code sessions.</p></article>
+        <article class="card"><div class="icon">03</div><h3>Telegram Command Center</h3><p>Follow wallets, inspect positions, review PnL, and control notifications from a concise mobile interface.</p></article>
+        <article class="card"><div class="icon">04</div><h3>Risk Guardrails</h3><p>Maximum concurrent positions, fixed sizing, market-liquidity checks, duplicate-trade protection, and configurable sell behavior.</p></article>
+        <article class="card"><div class="icon">05</div><h3>Full Audit Trail</h3><p>PostgreSQL records wallet metadata, trade events, copy decisions, position status, PnL, and alert preferences.</p></article>
+        <article class="card"><div class="icon">06</div><h3>Production Observability</h3><p>Prometheus metrics and Grafana dashboards track execution latency, portfolio exposure, system health, and performance.</p></article>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="kicker">System flow</div><h2 class="section-title">From public wallet data to a governed action.</h2>
+      <div class="steps">
+        <article class="step"><div class="number">01 / DISCOVER</div><h3>Scan wallets</h3><p>Ingest leaderboard and trade data, then score eligible wallets against your performance thresholds.</p></article>
+        <article class="step"><div class="number">02 / FILTER</div><h3>Validate signals</h3><p>Reject duplicates, stale activity, low-liquidity markets, and trades that violate exposure rules.</p></article>
+        <article class="step"><div class="number">03 / NOTIFY</div><h3>Alert in Telegram</h3><p>Send clear, timestamped signal information to your Telegram command center.</p></article>
+        <article class="step"><div class="number">04 / MEASURE</div><h3>Track results</h3><p>Persist execution outcomes and surface PnL, latency, and health data through your dashboard.</p></article>
+      </div>
+    </section>
+
+    <section id="stack">
+      <div class="kicker">Developer-ready</div><h2 class="section-title">Deploy locally or on your VPS.</h2><p class="section-copy">A Docker Compose stack keeps services isolated, repeatable, and straightforward to inspect.</p>
+      <div class="stack">
+        <div class="code-panel"><pre><span class="muted"># Configure your environment</span>
+cp env.env .env
+
+<span class="muted"># Launch the stack</span>
+docker compose up -d
+
+<span class="muted"># Inspect the orchestrator</span>
+docker compose logs -f jev-ai
+
+<span class="muted"># Monitor</span>
+open http://localhost:3000 <span class="muted"># Grafana</span></pre></div>
+        <div class="stat-panel"><div class="stat"><span>Orchestrator</span><b>Python + asyncio</b></div><div class="stat"><span>Persistence</span><b>PostgreSQL 17</b></div><div class="stat"><span>Agent interface</span><b>Model Context Protocol</b></div><div class="stat"><span>Alerts</span><b>Telegram / aiogram</b></div><div class="stat"><span>Monitoring</span><b>Prometheus + Grafana</b></div></div>
+      </div>
+    </section>
+
+    <div class="cta"><div class="kicker">Open source foundation</div><h2>Build a repeatable prediction-market workflow.</h2><p>Clone the repository, configure your environment, start in paper mode, and validate every execution path before using real capital.</p><a class="button primary" href="https://github.com/mednabouli/jev-ai-polymarket-copy-trading">View project on GitHub ↗</a></div>
+    <footer><span>© 2026 Jev AI · Built by mednabouli</span><span><a href="https://github.com/mednabouli/jev-ai-polymarket-copy-trading">GitHub</a> · Research tooling only — not financial advice.</span></footer>
+  </main>
+</body>
+</html>
