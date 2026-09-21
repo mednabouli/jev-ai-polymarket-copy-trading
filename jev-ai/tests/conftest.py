@@ -13,6 +13,7 @@ if str(APP_DIR) not in sys.path:
 
 @pytest.fixture
 def sample_wallet():
+    """Sample profitable wallet for testing."""
     return {
         "address": "0x1111111111111111111111111111111111111111",
         "name": "test-whale",
@@ -29,6 +30,7 @@ def sample_wallet():
 
 @pytest.fixture
 def sample_trade():
+    """Sample trade for testing."""
     return {
         "wallet_address": "0x1111111111111111111111111111111111111111",
         "market_id": "market-123",
@@ -43,8 +45,11 @@ def sample_trade():
 
 @pytest.fixture
 def mock_database():
+    """Mock database with async methods."""
     db = AsyncMock()
     db.fetch_all = AsyncMock(return_value=[])
     db.fetch_one = AsyncMock(return_value=None)
+    db.fetch_val = AsyncMock(return_value=None)
     db.execute = AsyncMock(return_value="INSERT 0 1")
+    db.execute_many = AsyncMock(return_value=None)
     return db
