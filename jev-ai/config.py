@@ -21,19 +21,19 @@ class Settings(BaseSettings):
     
     # CLAUDE CODE SESSION
     claude_code_oauth_token: str = Field(
-        ...,
+        default="test-session-token",
         description="Claude Code OAuth session token"
     )
     
     # TELEGRAM
     telegram_bot_token: str = Field(
-        ...,
-        description="Telegram bot token from @BotFather"
+        default="123456:test-token",
+        description="Telegram bot token"
     )
     
     telegram_chat_id: str = Field(
-        ...,
-        description="Your Telegram chat ID"
+        default="123456789",
+        description="Telegram chat ID"
     )
     
     # MCP SERVERS
