@@ -1,0 +1,15 @@
+apiVersion: 1
+
+providers:
+  - name: 'Jev AI Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+
+# Dashboard JSON will be auto-generated from Grafana UI
+# This file enables dashboard provisioning from the dashboards/ directory

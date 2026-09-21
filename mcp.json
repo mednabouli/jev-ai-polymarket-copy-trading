@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "polymarket": {
+      "command": "python",
+      "args": ["-m", "polymarket_mcp_server.main"],
+      "cwd": "./mcp-polymarket",
+      "env": {
+        "GAMMA_API_URL": "https://gamma-api.polymarket.com",
+        "GAMMA_REQUIRES_AUTH": "false",
+        "PYTHONPATH": "./mcp-polymarket/src"
+      },
+      "transport": "stdio"
+    },
+    "telegram": {
+      "command": "python",
+      "args": ["server.py"],
+      "cwd": "./mcp-telegram",
+      "env": {
+        "TELEGRAM_BOT_TOKEN": "${TELEGRAM_BOT_TOKEN}",
+        "TELEGRAM_CHAT_ID": "${TELEGRAM_CHAT_ID}",
+        "MCP_SERVER_PORT": "8765"
+      },
+      "transport": "http",
+      "url": "http://localhost:8765/mcp"
+    }
+  }
+}

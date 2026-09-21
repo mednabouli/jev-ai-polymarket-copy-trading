@@ -1,0 +1,27 @@
+{
+  "env": {
+    "CLAUDE_CODE_OAUTH_TOKEN": "${CLAUDE_CODE_OAUTH_TOKEN}"
+  },
+  "mcpServers": {
+    "polymarket": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "jev-ai-polymarket-copy-trading-mcp-polymarket"],
+      "cwd": ".",
+      "env": {
+        "GAMMA_API_URL": "https://gamma-api.polymarket.com",
+        "GAMMA_REQUIRES_AUTH": "false",
+        "MCP_SERVER_PORT": "8766"
+      }
+    },
+    "telegram": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "jev-ai-polymarket-copy-trading-mcp-telegram"],
+      "cwd": ".",
+      "env": {
+        "TELEGRAM_BOT_TOKEN": "${TELEGRAM_BOT_TOKEN}",
+        "TELEGRAM_CHAT_ID": "${TELEGRAM_CHAT_ID}",
+        "MCP_SERVER_PORT": "8765"
+      }
+    }
+  }
+}
