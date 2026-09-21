@@ -1,11 +1,13 @@
 """Database schema migrations."""
 
+from database.migrations_backtesting import MIGRATION as MIGRATION_BACKTESTING
 from database.migrations_copiability import MIGRATION as MIGRATION_COPIABILITY
 from database.migrations_event_sourcing import MIGRATION as MIGRATION_EVENT_SOURCING
 
 MIGRATIONS = [
     MIGRATION_COPIABILITY,
     MIGRATION_EVENT_SOURCING,
+    MIGRATION_BACKTESTING,
     """
     CREATE TABLE IF NOT EXISTS wallet_metrics (
         id SERIAL PRIMARY KEY,
