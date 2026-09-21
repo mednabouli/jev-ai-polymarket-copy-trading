@@ -10,12 +10,15 @@ import logging
 from typing import Optional
 import structlog
 
-from config import settings
+from config import get_settings, Settings
 from wallet_tracker import WalletTracker
 from copy_executor import CopyExecutor
 from telegram_handler import TelegramHandler
 from database import Database
 from metrics import MetricsCollector
+
+# Get settings
+settings: Settings = get_settings()
 
 # Configure structured logging
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
