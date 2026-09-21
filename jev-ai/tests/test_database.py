@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from database import Database
+from database.database import Database
 
 
 class TestDatabase:
