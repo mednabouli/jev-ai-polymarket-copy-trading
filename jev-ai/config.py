@@ -1,7 +1,7 @@
 """Configuration settings for Jev AI."""
 
 from typing import Optional
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,20 +36,25 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", description="Telegram bot token")
     telegram_chat_id: str = Field(default="", description="Telegram chat ID")
 
-    @field_validator("environment")
-    @classmethod
-    def validate_environment(cls, v: str) -> str:
-        allowed = {"development", "test", "production"}
-        if v not in allowed:
-            raise ValueError(f"Environment must be one of {allowed}")
-        return v
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
 
-    @field_validator("telegram_bot_token", "telegram_chat_id")
+    @field_validator("log_level")
     @classmethod
-    def validate_telegram_required_in_prod(cls, v: str, info) -> str:
-        if info.data.get("environment") == "production" and not v:
-            raise ValueError("Telegram credentials are required in production")
-        return v
+    def validate_log_level(cls, v: str) -> str:
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if v.upper() not in allowed:
+            raise ValueError(f"Log level must be one of {allowed}")
+        return v.upper()
+
+    @model_validator(mode="after")
+    def validate_telegram_required_in_prod(self) -> "Settings":
+        if self.environment == "production" and not self.telegram_bot_token:
+            raise ValueError("TELEGRAM_BOT_TOKEN is required in production")
+        if self.environment == "production" and not self.telegram_chat_id:
+            raise ValueError("TELEGRAM_CHAT_ID is required in production")
+        return self
 
 
 def get_settings() -> Settings:

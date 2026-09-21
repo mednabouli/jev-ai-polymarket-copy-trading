@@ -1,29 +1,32 @@
-"""Tests for application configuration."""
+"""Test suite for Jev AI configuration."""
 
 import os
-import sys
-from pathlib import Path
-
 import pytest
 from pydantic import ValidationError
 
-APP_DIR = Path(__file__).resolve().parents[1]
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
 
-
-def load_settings_class(monkeypatch, **overrides):
-    """Load Settings class without instantiating it."""
-    defaults = {
-        "CLAUDE_CODE_OAUTH_TOKEN": "test-session-token",
+def load_settings_class(monkeypatch, **env_overrides):
+    """Dynamically load Settings class with isolated environment."""
+    base_env = {
+        "ENVIRONMENT": "development",
+        "LOG_LEVEL": "INFO",
+        "DATABASE_URL": "postgresql://jev_user:jev_pass@localhost:5432/jev_ai",
+        "MCP_POLYMARKET_URL": "http://localhost:8081",
+        "MCP_TELEGRAM_URL": "http://localhost:8082",
+        "POSITION_SIZE_USDC": "50.0",
+        "MAX_POSITIONS": "10",
+        "COPY_SELLS": "true",
+        "POLL_INTERVAL_SECS": "60",
+        "MIN_TRADES_90D": "20",
+        "MIN_LIFETIME_PNL": "10000.0",
+        "MIN_WIN_RATE": "0.20",
         "TELEGRAM_BOT_TOKEN": "123456:test-token",
         "TELEGRAM_CHAT_ID": "123456789",
     }
-    defaults.update(overrides)
-    for key, value in defaults.items():
-        monkeypatch.setenv(key, str(value))
+    base_env.update(env_overrides)
+    for key, value in base_env.items():
+        monkeypatch.setenv(key, value)
 
-    sys.modules.pop("config", None)
     from config import Settings
     return Settings
 
@@ -32,24 +35,34 @@ def test_settings_load_required_values(monkeypatch):
     Settings = load_settings_class(monkeypatch)
     settings = Settings()
 
-    assert settings.claude_code_oauth_token == "test-session-token"
-    assert settings.telegram_chat_id == "123456789"
-    assert settings.min_trades_90d == 20
+    assert settings.environment == "development"
+    assert settings.log_level == "INFO"
+    assert settings.database_url == "postgresql://jev_user:jev_pass@localhost:5432/jev_ai"
     assert settings.position_size_usdc == 50.0
+    assert settings.max_positions == 10
+    assert settings.min_trades_90d == 20
+    assert settings.min_lifetime_pnl == 10000.0
+    assert settings.min_win_rate == 0.20
+    assert settings.telegram_bot_token == "123456:test-token"
+    assert settings.telegram_chat_id == "123456789"
 
 
 def test_settings_reject_invalid_win_rate(monkeypatch):
     Settings = load_settings_class(monkeypatch, MIN_WIN_RATE="1.5")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         Settings()
+
+    assert "min_win_rate" in str(exc_info.value)
 
 
 def test_settings_reject_invalid_log_level(monkeypatch):
     Settings = load_settings_class(monkeypatch, LOG_LEVEL="LOUD")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         Settings()
+
+    assert "log_level" in str(exc_info.value)
 
 
 def test_settings_detects_production(monkeypatch):
@@ -58,3 +71,20 @@ def test_settings_detects_production(monkeypatch):
 
     settings = Settings()
     assert settings.is_production is True
+    assert settings.environment == "production"
+
+
+def test_settings_reject_production_without_telegram(monkeypatch):
+    Settings = load_settings_class(monkeypatch, TELEGRAM_BOT_TOKEN="", ENVIRONMENT="production")
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+
+    assert "TELEGRAM_BOT_TOKEN" in str(exc_info.value)
+
+
+def test_settings_accept_valid_log_levels(monkeypatch):
+    for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
+        Settings = load_settings_class(monkeypatch, LOG_LEVEL=level)
+        settings = Settings()
+        assert settings.log_level == level
