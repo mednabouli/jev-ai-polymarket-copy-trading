@@ -87,8 +87,6 @@ class Settings(BaseSettings):
         return self.log_level == 'DEBUG'
 
 
-settings = Settings()
-
-
 def get_settings() -> Settings:
-    return settings
+    """Get settings instance - lazy instantiation to avoid validation at import time"""
+    return Settings()
