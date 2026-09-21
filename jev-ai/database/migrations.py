@@ -1,8 +1,11 @@
 """Database schema migrations."""
 
 from database.migrations_copiability import MIGRATION as MIGRATION_COPIABILITY
+from database.migrations_event_sourcing import MIGRATION as MIGRATION_EVENT_SOURCING
 
 MIGRATIONS = [
+    MIGRATION_COPIABILITY,
+    MIGRATION_EVENT_SOURCING,
     """
     CREATE TABLE IF NOT EXISTS wallet_metrics (
         id SERIAL PRIMARY KEY,
@@ -62,7 +65,6 @@ MIGRATIONS = [
     CREATE INDEX IF NOT EXISTS idx_closed_positions_wallet ON closed_positions (wallet_address);
     CREATE INDEX IF NOT EXISTS idx_closed_positions_condition ON closed_positions (condition_id);
     """,
-    MIGRATION_COPIABILITY,
 ]
 
 

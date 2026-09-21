@@ -1,16 +1,14 @@
-"""Copy executor module.
-
-Executes copy trades based on followed wallet activity.
-Now integrates execution simulator for realistic paper trading.
-"""
+"""Copy executor module with event sourcing integration."""
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+from uuid import uuid4
 import structlog
 import httpx
 
 from database import Database
 from strategy.execution_simulator import ExecutionSimulator, SimulatedFill
+from event_store import EventStore
 
 logger = structlog.get_logger()
 
@@ -42,6 +40,7 @@ class CopyExecutor:
             max_slippage_bps=max_slippage_bps,
             latency_seconds=latency_seconds,
         )
+        self.event_store = EventStore(db)
 
     async def initialize(self) -> None:
         self._http_client = httpx.AsyncClient(base_url=self.mcp_url, timeout=30.0)
@@ -105,12 +104,37 @@ class CopyExecutor:
         market_liquidity: float,
     ) -> Optional[Dict[str, Any]]:
         """Simulate execution and insert paper trade if conditions met."""
-        
+
+        correlation_id = str(uuid4())
+        signal = {
+            "leader_wallet": trade.get("wallet_address"),
+            "market_id": trade.get("market_id"),
+            "outcome": trade.get("outcome"),
+            "side": trade.get("side", "BUY"),
+            "signal_price": trade.get("price", 0.5),
+            "timestamp": datetime.utcnow(),
+            "wallet_score": wallet_score,
+            "market_liquidity": market_liquidity,
+            "metadata": trade,
+        }
+
+        await self.event_store.record_signal(signal, correlation_id)
+        signal_id = self.event_store.make_idempotency_key(
+            "signal",
+            signal["leader_wallet"],
+            signal["market_id"],
+            signal["outcome"],
+            signal["timestamp"],
+            signal["side"],
+        )
+
         should_execute, reason = self.simulator.should_execute_trade(
             wallet_score=wallet_score,
             market_liquidity=market_liquidity,
             signal_age_seconds=5,
         )
+
+        await self.event_store.record_decision(signal_id, should_execute, reason, correlation_id)
 
         if not should_execute:
             logger.info(
@@ -119,6 +143,18 @@ class CopyExecutor:
                 reason=reason,
             )
             return None
+
+        order = {
+            "signal_id": signal_id,
+            "market_id": trade.get("market_id"),
+            "outcome": trade.get("outcome"),
+            "side": trade.get("side", "BUY"),
+            "requested_size": self.position_size_usdc,
+            "requested_price": trade.get("price", 0.5),
+            "order_type": "market",
+            "metadata": {"leader_wallet": trade.get("wallet_address")},
+        }
+        await self.event_store.record_order(order, correlation_id)
 
         signal_price = trade.get("price", 0.5)
         side = trade.get("side", "BUY")
@@ -151,6 +187,16 @@ class CopyExecutor:
             )
             return None
 
+        fill_event = {
+            "order_id": order.get("signal_id"),
+            "fill_price": fill.fill_price,
+            "fill_size": fill.fill_size,
+            "fees_usdc": fill.fees_usdc,
+            "slippage_bps": fill.slippage_bps,
+            "metadata": {"market_id": trade.get("market_id"), "outcome": trade.get("outcome")},
+        }
+        await self.event_store.record_fill(fill_event, correlation_id)
+
         trade_record = {
             "market_id": trade.get("market_id"),
             "outcome": trade.get("outcome"),
@@ -165,7 +211,7 @@ class CopyExecutor:
         }
 
         await self._insert_copy_trade(trade_record)
-        
+
         logger.info(
             "Copy trade executed (paper)",
             market_id=trade.get("market_id", "")[:10],
