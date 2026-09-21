@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -28,13 +28,20 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov
 
+      - name: Debug - List files
+        run: |
+          cd jev-ai
+          ls -la
+          echo "---"
+          cat requirements.txt
+
       - name: Run tests
         run: |
           cd jev-ai
-          pytest tests/ -v --cov=. --cov-report=term-missing
+          pytest tests/ -v --tb=long
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
@@ -49,7 +56,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug - Python path
+        run: |
+          cd jev-ai
+          python --version
+          pip list
+          echo "---"
+          python -c "import sys; print(sys.path)"
+
       - name: Check imports
         run: |
           cd jev-ai
-          python -c "import main, config, wallet_tracker, copy_executor, telegram_handler, database, metrics"
+          python -c "import main; print('main OK')"
+          python -c "import config; print('config OK')"
+          python -c "import wallet_tracker; print('wallet_tracker OK')"
+          python -c "import copy_executor; print('copy_executor OK')"
+          python -c "import telegram_handler; print('telegram_handler OK')"
+          python -c "import database; print('database OK')"
+          python -c "import metrics; print('metrics OK')"
