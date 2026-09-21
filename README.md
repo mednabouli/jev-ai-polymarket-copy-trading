@@ -23,6 +23,12 @@ Ce projet est un **outil de recherche et de simulation**. Il ne doit **pas** êt
 │   Telegram UI   │     │   Prometheus     │
 │  (Commands)     │     │   (Metrics)      │
 └─────────────────┘     └──────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐
+                       │    Grafana       │
+                       │   (Dashboards)   │
+                       └──────────────────┘
 ```
 
 ## FonctionnalitÃ©s
@@ -64,14 +70,19 @@ Ce projet est un **outil de recherche et de simulation**. Il ne doit **pas** êt
 - `/positions` : positions ouvertes
 - `/pnl` : performance cumulÃ©e
 
-### MÃ©triques
+### Monitoring
 
-- Nombre de wallets suivis
-- Positions ouvertes
-- PnL rÃ©alisÃ© et non rÃ©alisÃ©
-- Export Prometheus (port 9091)
+- **Prometheus** : mÃ©triques temps rÃ©el (PnL, positions, wallets)
+- **Grafana** : dashboard prÃ©-configurÃ© avec 6 panels
+  - Followed Wallets
+  - Open Positions
+  - Realized/Unrealized PnL
+  - PnL Over Time
+  - Wallets & Positions
 
 ## DÃ©marrage rapide
+
+### Option 1 : Docker Compose (recommandÃ©)
 
 ```bash
 # 1. Cloner
@@ -80,13 +91,39 @@ cd jev-ai-polymarket-copy-trading/jev-ai
 
 # 2. Configurer
 cp .env.example .env
-# Ãditer .env avec vos paramÃ¨tres (MCP servers, Telegram, etc.)
+# Ãditer .env avec vos paramÃ¨tres (Telegram, etc.)
 
-# 3. Lancer avec Docker Compose
+# 3. Lancer toute la stack
 docker compose up -d
 
 # 4. VÃ©rifier les logs
 docker compose logs -f jev-ai
+
+# 5. AccÃ©der aux services
+# - Grafana : http://localhost:3000 (admin/admin123)
+# - Prometheus : http://localhost:9090
+# - PostgreSQL : localhost:5432
+```
+
+### Option 2 : Manuel
+
+```bash
+# 1. Installer les dÃ©pendances
+pip install -r requirements.txt
+
+# 2. Configurer
+cp .env.example .env
+
+# 3. Lancer PostgreSQL
+docker run -d --name postgres \
+  -e POSTGRES_USER=jev_user \
+  -e POSTGRES_PASSWORD=jev_pass \
+  -e POSTGRES_DB=jev_ai \
+  -p 5432:5432 \
+  postgres:15-alpine
+
+# 4. Lancer l'application
+python main.py
 ```
 
 ## Configuration
@@ -161,6 +198,7 @@ pytest jev-ai/tests/ --cov=jev-ai --cov-report=term-missing
 - [x] DÃ©tection market making / arbitrage / HFT
 - [x] Simulation slippage + frais
 - [x] Event sourcing complet
+- [x] Dashboard Grafana
 
 ### Phase 2 - Paper trading rigoureux (en cours)
 
@@ -169,7 +207,7 @@ pytest jev-ai/tests/ --cov=jev-ai --cov-report=term-missing
 - [ ] Gestion de position par marchÃ©
 - [ ] Limites d'exposition et kill switch
 - [ ] Backtest walk-forward
-- [ ] Dashboard Grafana avancÃ©
+- [ ] Dashboard Grafana avancÃ© (PnL par wallet, catÃ©gorie)
 
 ### Phase 3 - ExÃ©cution rÃ©elle limitÃ©e
 
