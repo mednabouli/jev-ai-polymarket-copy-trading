@@ -1,58 +1,68 @@
-"""Tests for the database adapter without PostgreSQL access."""
-
-import sys
-from pathlib import Path
-from unittest.mock import AsyncMock
+"""Test suite for database module."""
 
 import pytest
-
-APP_DIR = Path(__file__).resolve().parents[1]
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from database import Database
 
 
-class FakeAcquire:
-    def __init__(self, connection):
-        self.connection = connection
+class TestDatabase:
+    """Tests for Database class."""
 
-    async def __aenter__(self):
-        return self.connection
+    @pytest.mark.asyncio
+    async def test_fetch_one_returns_dict(self):
+        """Test that fetch_one returns a dictionary."""
+        mock_cursor = AsyncMock()
+        mock_cursor.description = [("id", None), ("name", None)]
+        mock_cursor.fetchone = AsyncMock(return_value=(1, "test"))
+        
+        mock_conn = AsyncMock()
+        mock_conn.cursor = MagicMock(return_value=mock_cursor.__aenter__.return_value)
+        mock_conn.cursor.return_value.__aenter__ = AsyncMock(return_value=mock_cursor)
+        
+        with patch("psycopg.AsyncConnection.connect", return_value=mock_conn):
+            db = Database("postgresql://test")
+            await db.initialize()
+            
+            result = await db.fetch_one("SELECT * FROM test WHERE id = :id", {"id": 1})
+            
+            assert result == {"id": 1, "name": "test"}
+            await db.close()
 
-    async def __aexit__(self, exc_type, exc, traceback):
-        return False
+    @pytest.mark.asyncio
+    async def test_fetch_all_returns_list_of_dicts(self):
+        """Test that fetch_all returns a list of dictionaries."""
+        mock_cursor = AsyncMock()
+        mock_cursor.description = [("id", None), ("name", None)]
+        mock_cursor.fetchall = AsyncMock(return_value=[(1, "a"), (2, "b")])
+        
+        mock_conn = AsyncMock()
+        mock_conn.cursor = MagicMock(return_value=mock_cursor.__aenter__.return_value)
+        mock_conn.cursor.return_value.__aenter__ = AsyncMock(return_value=mock_cursor)
+        
+        with patch("psycopg.AsyncConnection.connect", return_value=mock_conn):
+            db = Database("postgresql://test")
+            await db.initialize()
+            
+            result = await db.fetch_all("SELECT * FROM test")
+            
+            assert result == [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+            await db.close()
 
-
-class FakePool:
-    def __init__(self, connection):
-        self.connection = connection
-
-    def acquire(self):
-        return FakeAcquire(self.connection)
-
-
-@pytest.mark.asyncio
-async def test_fetch_one_returns_dict():
-    connection = AsyncMock()
-    connection.fetchrow.return_value = {"id": 1, "name": "whale"}
-    db = Database("postgresql://unused")
-    db._pool = FakePool(connection)
-
-    result = await db.fetch_one("SELECT id, name FROM wallets")
-
-    assert result == {"id": 1, "name": "whale"}
-    connection.fetchrow.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_fetch_all_returns_list_of_dicts():
-    connection = AsyncMock()
-    connection.fetch.return_value = [{"id": 1}, {"id": 2}]
-    db = Database("postgresql://unused")
-    db._pool = FakePool(connection)
-
-    result = await db.fetch_all("SELECT id FROM wallets")
-
-    assert result == [{"id": 1}, {"id": 2}]
-    connection.fetch.assert_awaited_once()
+    @pytest.mark.asyncio
+    async def test_execute_calls_commit(self):
+        """Test that execute commits the transaction."""
+        mock_cursor = AsyncMock()
+        mock_cursor.__aenter__ = AsyncMock(return_value=mock_cursor)
+        
+        mock_conn = AsyncMock()
+        mock_conn.cursor = MagicMock(return_value=mock_cursor)
+        
+        with patch("psycopg.AsyncConnection.connect", return_value=mock_conn):
+            db = Database("postgresql://test")
+            await db.initialize()
+            
+            await db.execute("INSERT INTO test VALUES (:id)", {"id": 1})
+            
+            assert mock_conn.commit.called
+            await db.close()
