@@ -12,7 +12,8 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 
-def load_settings(monkeypatch, **overrides):
+def load_settings_class(monkeypatch, **overrides):
+    """Load Settings class without instantiating it."""
     defaults = {
         "CLAUDE_CODE_OAUTH_TOKEN": "test-session-token",
         "TELEGRAM_BOT_TOKEN": "123456:test-token",
@@ -28,7 +29,7 @@ def load_settings(monkeypatch, **overrides):
 
 
 def test_settings_load_required_values(monkeypatch):
-    Settings = load_settings(monkeypatch)
+    Settings = load_settings_class(monkeypatch)
     settings = Settings()
 
     assert settings.claude_code_oauth_token == "test-session-token"
@@ -38,21 +39,21 @@ def test_settings_load_required_values(monkeypatch):
 
 
 def test_settings_reject_invalid_win_rate(monkeypatch):
-    Settings = load_settings(monkeypatch, MIN_WIN_RATE="1.5")
+    Settings = load_settings_class(monkeypatch, MIN_WIN_RATE="1.5")
 
     with pytest.raises(ValidationError):
         Settings()
 
 
 def test_settings_reject_invalid_log_level(monkeypatch):
-    Settings = load_settings(monkeypatch, LOG_LEVEL="LOUD")
+    Settings = load_settings_class(monkeypatch, LOG_LEVEL="LOUD")
 
     with pytest.raises(ValidationError):
         Settings()
 
 
 def test_settings_detects_production(monkeypatch):
-    Settings = load_settings(monkeypatch)
+    Settings = load_settings_class(monkeypatch)
     monkeypatch.setenv("ENVIRONMENT", "production")
 
     settings = Settings()
