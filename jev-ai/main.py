@@ -1,1 +1,208 @@
-"""\nJev AI - Polymarket Copy Trading Orchestrator\n\nMain entry point for the copy trading automation system.\nCoordinates MCP servers, wallet filtering, and trade execution.\n"""\n\nimport asyncio\nimport signal\nfrom typing import Optional\nimport structlog\n\nfrom config import settings\nfrom wallet_tracker import WalletTracker\nfrom copy_executor import CopyExecutor\nfrom telegram_handler import TelegramHandler\nfrom database import Database\nfrom metrics import MetricsCollector\n\n# Configure structured logging\nstructlog.configure(\n    processors=[\n        structlog.processors.TimeStamper(fmt="iso"),\n        structlog.processors.add_log_level,\n        structlog.processors.JSONRenderer()\n    ],\n    wrapper_class=structlog.make_filtering_bound_logger(\n        getattr(structlog, settings.log_level)\n    ),\n    context_class=dict,\n    logger_factory=structlog.PrintLoggerFactory(),\n    cache_logger_on_first_use=True,\n)\n\nlogger = structlog.get_logger()\n\n\nclass JevAIOrchestrator:\n    """\n    Main orchestrator for copy trading automation.\n    \n    Coordinates:\n    - Wallet tracking (profitable whale detection)\n    - Copy trade execution\n    - Telegram notifications\n    - Metrics collection\n    """\n    \n    def __init__(self):\n        self.db: Optional[Database] = None\n        self.wallet_tracker: Optional[WalletTracker] = None\n        self.copy_executor: Optional[CopyExecutor] = None\n        self.telegram_handler: Optional[TelegramHandler] = None\n        self.metrics: Optional[MetricsCollector] = None\n        self._shutdown_event = asyncio.Event()\n        \n    async def initialize(self) -> None:\n        """Initialize all components"""\n        logger.info("Initializing Jev AI Orchestrator")\n        \n        # Initialize database\n        self.db = Database(settings.database_url)\n        await self.db.initialize()\n        logger.info("Database connected")\n        \n        # Initialize metrics collector\n        self.metrics = MetricsCollector()\n        logger.info("Metrics collector initialized")\n        \n        # Initialize wallet tracker\n        self.wallet_tracker = WalletTracker(\n            db=self.db,\n            mcp_polymarket_url=settings.mcp_polymarket_url,\n            min_trades_90d=settings.min_trades_90d,\n            min_lifetime_pnl=settings.min_lifetime_pnl,\n            min_win_rate=settings.min_win_rate,\n        )\n        await self.wallet_tracker.initialize()\n        logger.info(\n            "Wallet tracker initialized",\n            filters={\n                "min_trades_90d": settings.min_trades_90d,\n                "min_lifetime_pnl": settings.min_lifetime_pnl,\n                "min_win_rate": settings.min_win_rate,\n            }\n        )\n        \n        # Initialize copy executor\n        self.copy_executor = CopyExecutor(\n            db=self.db,\n            mcp_polymarket_url=settings.mcp_polymarket_url,\n            position_size_usdc=settings.position_size_usdc,\n            max_positions=settings.max_positions,\n            copy_sells=settings.copy_sells,\n        )\n        await self.copy_executor.initialize()\n        logger.info("Copy executor initialized")\n        \n        # Initialize Telegram handler\n        self.telegram_handler = TelegramHandler(\n            db=self.db,\n            bot_token=settings.telegram_bot_token,\n            chat_id=settings.telegram_chat_id,\n            mcp_telegram_url=settings.mcp_telegram_url,\n        )\n        await self.telegram_handler.initialize()\n        logger.info("Telegram handler initialized")\n        \n        logger.info("All components initialized successfully")\n    \n    async def run(self) -> None:\n        """\n        Main orchestration loop.\n        \n        Runs until shutdown signal is received.\n        """\n        logger.info("Starting orchestration loop")\n        \n        # Start background tasks\n        tasks = [\n            asyncio.create_task(self._wallet_tracking_loop()),\n            asyncio.create_task(self._copy_execution_loop()),\n            asyncio.create_task(self._metrics_loop()),\n            asyncio.create_task(self._telegram_polling_loop()),\n        ]\n        \n        # Wait for shutdown signal\n        await self._shutdown_event.wait()\n        \n        # Cancel all tasks\n        for task in tasks:\n            task.cancel()\n        \n        # Wait for tasks to finish\n        await asyncio.gather(*tasks, return_exceptions=True)\n        \n        logger.info("Orchestration loop stopped")\n    \n    async def _wallet_tracking_loop(self) -> None:\n        """Continuously track profitable wallets"""\n        logger.info("Starting wallet tracking loop")\n        \n        while not self._shutdown_event.is_set():\n            try:\n                await self.wallet_tracker.scan_wallets()\n                await asyncio.sleep(settings.poll_interval_secs)\n            except asyncio.CancelledError:\n                break\n            except Exception as e:\n                logger.error("Wallet tracking error", error=str(e))\n                await asyncio.sleep(10)\n    \n    async def _copy_execution_loop(self) -> None:\n        """Continuously check for copy trade opportunities"""\n        logger.info("Starting copy execution loop")\n        \n        while not self._shutdown_event.is_set():\n            try:\n                await self.copy_executor.check_and_execute()\n                await asyncio.sleep(5)  # Check every 5 seconds\n            except asyncio.CancelledError:\n                break\n            except Exception as e:\n                logger.error("Copy execution error", error=str(e))\n                await asyncio.sleep(10)\n    \n    async def _metrics_loop(self) -> None:\n        """Periodically collect and report metrics"""\n        logger.info("Starting metrics loop")\n        \n        while not self._shutdown_event.is_set():\n            try:\n                await self.metrics.collect()\n                await asyncio.sleep(60)  # Every minute\n            except asyncio.CancelledError:\n                break\n            except Exception as e:\n                logger.error("Metrics collection error", error=str(e))\n    \n    async def _telegram_polling_loop(self) -> None:\n        """Poll Telegram for user commands"""\n        logger.info("Starting Telegram polling loop")\n        \n        try:\n            await self.telegram_handler.start_polling()\n        except asyncio.CancelledError:\n            pass\n        except Exception as e:\n            logger.error("Telegram polling error", error=str(e))\n    \n    async def shutdown(self) -> None:\n        """Graceful shutdown"""\n        logger.info("Initiating graceful shutdown")\n        \n        # Signal shutdown\n        self._shutdown_event.set()\n        \n        # Close components\n        if self.telegram_handler:\n            await self.telegram_handler.close()\n        if self.copy_executor:\n            await self.copy_executor.close()\n        if self.wallet_tracker:\n            await self.wallet_tracker.close()\n        if self.db:\n            await self.db.close()\n        \n        logger.info("Shutdown complete")\n    \n    def request_shutdown(self) -> None:\n        """Request shutdown (called from signal handlers)"""\n        logger.info("Shutdown requested")\n        asyncio.create_task(self.shutdown())\n\n\nasync def main() -> None:\n    """Main entry point"""\n    orchestrator = JevAIOrchestrator()\n    \n    # Setup signal handlers\n    loop = asyncio.get_running_loop()\n    \n    for sig in (signal.SIGTERM, signal.SIGINT):\n        loop.add_signal_handler(\n            sig,\n            lambda: orchestrator.request_shutdown()\n        )\n    \n    try:\n        # Initialize\n        await orchestrator.initialize()\n        \n        # Run\n        await orchestrator.run()\n    except Exception as e:\n        logger.error("Fatal error", error=str(e))\n        raise\n    finally:\n        # Cleanup\n        await orchestrator.shutdown()\n\n\nif __name__ == "__main__":\n    asyncio.run(main())\n
+"""
+Jev AI - Polymarket Copy Trading Orchestrator
+
+Main entry point for the copy trading automation system.
+"""
+
+import asyncio
+import signal
+from typing import Optional
+import structlog
+
+from config import settings
+from wallet_tracker import WalletTracker
+from copy_executor import CopyExecutor
+from telegram_handler import TelegramHandler
+from database import Database
+from metrics import MetricsCollector
+
+# Configure structured logging
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.add_log_level,
+        structlog.processors.JSONRenderer()
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(
+        getattr(structlog, settings.log_level)
+    ),
+    context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+logger = structlog.get_logger()
+
+
+class JevAIOrchestrator:
+    """Main orchestrator for copy trading automation."""
+    
+    def __init__(self):
+        self.db: Optional[Database] = None
+        self.wallet_tracker: Optional[WalletTracker] = None
+        self.copy_executor: Optional[CopyExecutor] = None
+        self.telegram_handler: Optional[TelegramHandler] = None
+        self.metrics: Optional[MetricsCollector] = None
+        self._shutdown_event = asyncio.Event()
+        
+    async def initialize(self) -> None:
+        """Initialize all components"""
+        logger.info("Initializing Jev AI Orchestrator")
+        
+        self.db = Database(settings.database_url)
+        await self.db.initialize()
+        logger.info("Database connected")
+        
+        self.metrics = MetricsCollector()
+        logger.info("Metrics collector initialized")
+        
+        self.wallet_tracker = WalletTracker(
+            db=self.db,
+            mcp_polymarket_url=settings.mcp_polymarket_url,
+            min_trades_90d=settings.min_trades_90d,
+            min_lifetime_pnl=settings.min_lifetime_pnl,
+            min_win_rate=settings.min_win_rate,
+        )
+        await self.wallet_tracker.initialize()
+        logger.info("Wallet tracker initialized")
+        
+        self.copy_executor = CopyExecutor(
+            db=self.db,
+            mcp_polymarket_url=settings.mcp_polymarket_url,
+            position_size_usdc=settings.position_size_usdc,
+            max_positions=settings.max_positions,
+            copy_sells=settings.copy_sells,
+        )
+        await self.copy_executor.initialize()
+        logger.info("Copy executor initialized")
+        
+        self.telegram_handler = TelegramHandler(
+            db=self.db,
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
+            mcp_telegram_url=settings.mcp_telegram_url,
+        )
+        await self.telegram_handler.initialize()
+        logger.info("Telegram handler initialized")
+        
+        logger.info("All components initialized successfully")
+    
+    async def run(self) -> None:
+        """Main orchestration loop."""
+        logger.info("Starting orchestration loop")
+        
+        tasks = [
+            asyncio.create_task(self._wallet_tracking_loop()),
+            asyncio.create_task(self._copy_execution_loop()),
+            asyncio.create_task(self._metrics_loop()),
+            asyncio.create_task(self._telegram_polling_loop()),
+        ]
+        
+        await self._shutdown_event.wait()
+        
+        for task in tasks:
+            task.cancel()
+        
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        logger.info("Orchestration loop stopped")
+    
+    async def _wallet_tracking_loop(self) -> None:
+        """Continuously track profitable wallets"""
+        logger.info("Starting wallet tracking loop")
+        
+        while not self._shutdown_event.is_set():
+            try:
+                await self.wallet_tracker.scan_wallets()
+                await asyncio.sleep(settings.poll_interval_secs)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Wallet tracking error", error=str(e))
+                await asyncio.sleep(10)
+    
+    async def _copy_execution_loop(self) -> None:
+        """Continuously check for copy trade opportunities"""
+        logger.info("Starting copy execution loop")
+        
+        while not self._shutdown_event.is_set():
+            try:
+                await self.copy_executor.check_and_execute()
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Copy execution error", error=str(e))
+                await asyncio.sleep(10)
+    
+    async def _metrics_loop(self) -> None:
+        """Periodically collect and report metrics"""
+        logger.info("Starting metrics loop")
+        
+        while not self._shutdown_event.is_set():
+            try:
+                await self.metrics.collect()
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Metrics collection error", error=str(e))
+    
+    async def _telegram_polling_loop(self) -> None:
+        """Poll Telegram for user commands"""
+        logger.info("Starting Telegram polling loop")
+        
+        try:
+            await self.telegram_handler.start_polling()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Telegram polling error", error=str(e))
+    
+    async def shutdown(self) -> None:
+        """Graceful shutdown"""
+        logger.info("Initiating graceful shutdown")
+        
+        self._shutdown_event.set()
+        
+        if self.telegram_handler:
+            await self.telegram_handler.close()
+        if self.copy_executor:
+            await self.copy_executor.close()
+        if self.wallet_tracker:
+            await self.wallet_tracker.close()
+        if self.db:
+            await self.db.close()
+        
+        logger.info("Shutdown complete")
+    
+    def request_shutdown(self) -> None:
+        """Request shutdown (called from signal handlers)"""
+        logger.info("Shutdown requested")
+        asyncio.create_task(self.shutdown())
+
+
+async def main() -> None:
+    """Main entry point"""
+    orchestrator = JevAIOrchestrator()
+    
+    loop = asyncio.get_running_loop()
+    
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(
+            sig,
+            lambda: orchestrator.request_shutdown()
+        )
+    
+    try:
+        await orchestrator.initialize()
+        await orchestrator.run()
+    except Exception as e:
+        logger.error("Fatal error", error=str(e))
+        raise
+    finally:
+        await orchestrator.shutdown()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
