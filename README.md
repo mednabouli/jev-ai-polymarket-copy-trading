@@ -1,6 +1,6 @@
 # Jev AI - Polymarket Copy Trading
 
-**Statut actuel :** Prototype de recherche et paper-trading. **Pas d'exé¬¬cution réelle d'ordres.**
+**Statut actuel :** Plateforme de paper-trading event-sourced avec scoring de wallets et simulation réaliste.
 
 ## Avertissement
 
@@ -27,21 +27,40 @@ Ce projet est un **outil de recherche et de simulation**. Il ne doit **pas** êt
 
 ## FonctionnalitÃ©s
 
-### Tracking de wallets
+### Ingestion Polymarket
 
-- Scan pÃ©riodique du leaderboard Polymarket via MCP
-- Filtrage par PnL, win rate, volume et nombre de trades
-- Persistance dans PostgreSQL
+- Scan pÃ©riodique du leaderboard via API Data (`data-api.polymarket.com`)
+- Historisation des trades, positions clÃ´turÃ©es, mÃ©triques par wallet
+- CatÃ©gories : POLITICS, SPORTS, CRYPTO, OVERALL
+- PÃ©riodes : DAY, WEEK, MONTH
+
+### Scoring de wallets
+
+- DÃ©tection **Market Makers** (buy_ratio ~50%, win rate 45-55%,高频)
+- DÃ©tection **Arbitrageurs** (win rate >85%, petit PnL, faible variance)
+- DÃ©tection **HFT** (>50 trades/jour, nombreux marchÃ©s)
+- Score de **copiabilitÃ©** (0-100) : pattern + performance + consistency + activity
+- Recommandations : `STRONG BUY`, `BUY`, `HOLD`, `WEAK`, `AVOID`
 
 ### Copy executor (paper trading)
 
-- Simulation d'exÃ©cution basÃ©e sur les trades rÃ©cents
-- ContrÃ´les : liquiditÃ©, duplication, limite de positions
-- Journalisation structurÃ©e de chaque signal
+- Simulation d'exÃ©cution avec :
+  - **Slippage** modÃ©lisÃ© (order book ou estimation)
+  - **Frais** Polymarket (2%)
+  - **Latence** signal â exÃ©cution
+- DÃ©cision go/no-go basÃ©e sur score, liquiditÃ©, fraÃ®cheur du signal
+- Event sourcing complet pour audit et replay
+
+### Event sourcing
+
+- **Immutable event log** : `signal_detected`, `execution_decided`, `paper_order_created`, `paper_order_filled`
+- **Projections** : `signals`, `paper_orders`, `fills`, `copy_trades`, `market_resolutions`
+- **Idempotence** : clÃ©s uniques, pas de replay accidentel
+- **Correlation ID** : trace end-to-end d'un trade
 
 ### Interface Telegram
 
-- `/whales` : top wallets suivis
+- `/whales` : top wallets suivis (triÃ©s par score)
 - `/positions` : positions ouvertes
 - `/pnl` : performance cumulÃ©e
 
@@ -86,6 +105,40 @@ docker compose logs -f jev-ai
 | `TELEGRAM_BOT_TOKEN` | Token bot Telegram | (requis en prod) |
 | `TELEGRAM_CHAT_ID` | Chat ID Telegram | (requis en prod) |
 
+## Scripts CLI
+
+### Lister les signaux rÃ©cents
+
+```bash
+python scripts/list_signals.py --limit 50 --status approved
+```
+
+Filtres disponibles :
+- `--limit` : nombre max de signaux
+- `--status` : `detected`, `approved`, `rejected`
+- `--wallet` : filtre par adresse
+- `--market` : filtre par ID de marchÃ©
+
+### Auditer un signal spÃ©cifique
+
+```bash
+python scripts/replay_signal.py <signal_id>
+```
+
+Affiche :
+- MÃ©tadatas du signal (wallet, marchÃ©, score, liquiditÃ©)
+- Timeline complÃ¨te des Ã ©vÃ©nements
+- DÃ©tails de l'ordre paper et du fill
+- PnL estimÃ© si position clÃ´turÃ©e
+
+### Rejouer les derniers signaux
+
+```bash
+python scripts/replay_recent.py 5
+```
+
+Rejoue les 5 derniers signaux avec audit complet.
+
 ## Tests
 
 ```bash
@@ -98,23 +151,25 @@ pytest jev-ai/tests/ --cov=jev-ai --cov-report=term-missing
 
 ## Roadmap
 
-### Phase 1 - Edge research (actuel)
+### Phase 1 - Edge research (â¨½)
 
 - [x] Infrastructure de base (DB, MCP, Telegram, mÃ©triques)
 - [x] Tests unitaires
 - [x] CI/CD
-- [ ] Ingestion historique vÃ©rifiÃ©e des trades Polymarket
-- [ ] Calcul PnL rÃ©el par wallet
-- [ ] DÃ©tection market making / arbitrage
-- [ ] Simulation slippage + frais
+- [x] Ingestion API Polymarket vÃ©rifiÃ©e
+- [x] Calcul PnL par wallet
+- [x] DÃ©tection market making / arbitrage / HFT
+- [x] Simulation slippage + frais
+- [x] Event sourcing complet
 
-### Phase 2 - Paper trading rigoureux
+### Phase 2 - Paper trading rigoureux (en cours)
 
-- [ ] Event sourcing complet (signals, ordres, fills, rÃ©solutions)
-- [ ] Idempotency keys
+- [x] Event sourcing complet (signals, ordres, fills, rÃ©solutions)
+- [x] Idempotency keys
 - [ ] Gestion de position par marchÃ©
 - [ ] Limites d'exposition et kill switch
 - [ ] Backtest walk-forward
+- [ ] Dashboard Grafana avancÃ©
 
 ### Phase 3 - ExÃ©cution rÃ©elle limitÃ©e
 
