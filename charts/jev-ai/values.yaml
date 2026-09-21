@@ -1,0 +1,49 @@
+nameOverride: ""
+fullnameOverride: ""
+
+jevAi:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/mednabouli/jev-ai
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  env:
+    minTrades90d: "20"
+    minLifetimePnl: "10000"
+    minWinRate: "0.20"
+    maxPositions: "10"
+    positionSizeUsdc: "50"
+    copySells: "true"
+    pollIntervalSecs: "60"
+  secrets:
+    existingSecret: ""
+    claudeCodeOauthToken: ""
+    telegramBotToken: ""
+    telegramChatId: ""
+
+mcpPolymarket:
+  image: {repository: ghcr.io/mednabouli/jev-ai-mcp-polymarket, tag: latest, pullPolicy: IfNotPresent}
+  service: {port: 8766}
+mcpTelegram:
+  image: {repository: ghcr.io/mednabouli/jev-ai-mcp-telegram, tag: latest, pullPolicy: IfNotPresent}
+  service: {port: 8765}
+
+postgresql:
+  enabled: true
+  image: postgres:17-alpine
+  storageSize: 10Gi
+  storageClass: ""
+  database: polymarket
+  username: postgres
+  password: CHANGE_ME
+  service: {port: 5432}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: [{host: jev-ai.example.com, paths: [{path: /, pathType: Prefix}]}]
+  tls: []

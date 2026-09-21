@@ -1,0 +1,55 @@
+openapi: 3.1.0
+info:
+  title: Jev AI MCP HTTP Gateway
+  version: 0.1.0
+  description: Telegram MCP HTTP gateway. Primary protocol is MCP JSON-RPC, not REST.
+servers:
+  - url: http://localhost:8765
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service is running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, timestamp]
+                properties:
+                  status: {type: string, example: healthy}
+                  timestamp: {type: string, format: date-time}
+  /mcp:
+    post:
+      summary: Invoke a Telegram MCP tool through JSON-RPC
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jsonrpc, id, method, params]
+              properties:
+                jsonrpc: {type: string, const: '2.0'}
+                id: {oneOf: [{type: string}, {type: integer}]}
+                method: {type: string, const: tools/call}
+                params:
+                  type: object
+                  required: [name, arguments]
+                  properties:
+                    name: {type: string, enum: [send_message, get_updates, set_webhook, get_me]}
+                    arguments: {type: object, additionalProperties: true}
+      responses:
+        '200': {description: JSON-RPC result}
+        '500': {description: Gateway error}
+  /webhook/{token}:
+    post:
+      summary: Telegram webhook receiver
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Update accepted}

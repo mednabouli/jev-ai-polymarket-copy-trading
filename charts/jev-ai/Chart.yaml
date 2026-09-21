@@ -1,0 +1,9 @@
+apiVersion: v2
+name: jev-ai
+description: Helm chart for the Jev AI Polymarket research stack
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [polymarket, mcp, telegram, copy-trading]
+maintainers:
+  - name: mednabouli
