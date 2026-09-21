@@ -13,7 +13,7 @@ websockets==13.0
 
 # Telegram MCP Client
 aiogram==3.10.0
-aiofiles==24.1.0
+aiofiles~=23.2.1
 
 # Database
 asyncpg==0.29.0
