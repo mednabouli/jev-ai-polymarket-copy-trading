@@ -11,7 +11,7 @@ help: ## Show this help message
 build: ## Build all Docker images
 	docker compose build
 
-test: ## Run test suite
+test: ## Run test suite with coverage
 	cd jev-ai && pytest tests/ -v --cov=. --cov-report=term-missing
 
 lint: ## Check imports and basic linting
