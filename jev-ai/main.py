@@ -6,6 +6,7 @@ Main entry point for the copy trading automation system.
 
 import asyncio
 import signal
+import logging
 from typing import Optional
 import structlog
 
@@ -17,15 +18,15 @@ from database import Database
 from metrics import MetricsCollector
 
 # Configure structured logging
+log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.add_log_level,
         structlog.processors.JSONRenderer()
     ],
-    wrapper_class=structlog.make_filtering_bound_logger(
-        getattr(structlog, settings.log_level)
-    ),
+    wrapper_class=structlog.make_filtering_bound_logger(log_level),
     context_class=dict,
     logger_factory=structlog.PrintLoggerFactory(),
     cache_logger_on_first_use=True,
