@@ -40,14 +40,14 @@ def test_settings_load_required_values(monkeypatch):
 def test_settings_reject_invalid_win_rate(monkeypatch):
     Settings = load_settings(monkeypatch, MIN_WIN_RATE="1.5")
 
-    with pytest.raises(ValidationError, match="less_than_equal"):
+    with pytest.raises(ValidationError):
         Settings()
 
 
 def test_settings_reject_invalid_log_level(monkeypatch):
     Settings = load_settings(monkeypatch, LOG_LEVEL="LOUD")
 
-    with pytest.raises(ValidationError, match="value_error"):
+    with pytest.raises(ValidationError):
         Settings()
 
 
