@@ -1,7 +1,7 @@
 """Copy executor module."""
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import structlog
 import httpx
 
@@ -24,6 +24,8 @@ class CopyExecutor:
 
     async def initialize(self) -> None:
         self._http_client = httpx.AsyncClient(base_url=self.mcp_url, timeout=30.0)
+        self._last_poll_time = datetime.utcnow() - timedelta(minutes=5)
+        logger.info("CopyExecutor initialized")
 
     async def close(self) -> None:
         if self._http_client:
@@ -62,6 +64,48 @@ class CopyExecutor:
         result = await self.db.fetch_one("SELECT COUNT(*) AS count FROM copy_trades WHERE status = 'open'")
         return result["count"] if result else 0
 
+    async def _fetch_recent_leader_trades(self) -> List[Dict[str, Any]]:
+        if not self._http_client:
+            return []
+        try:
+            response = await self._http_client.post("/mcp", json={"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "get_recent_trades", "arguments": {"wallet_addresses": [], "since": self._last_poll_time.isoformat() if self._last_poll_time else None}}})
+            response.raise_for_status()
+            trades = response.json().get("result", {}).get("content", [])
+            self._last_poll_time = datetime.utcnow()
+            return trades
+        except Exception as exc:
+            logger.error("Failed to fetch recent trades", error=str(exc))
+            return []
+
+    async def _execute_copy_trade(self, trade: Dict[str, Any]) -> None:
+        market_id = trade.get("market_id")
+        outcome = trade.get("outcome")
+        wallet_address = trade.get("wallet_address")
+        side = trade.get("side", "BUY")
+        price = trade.get("price", 0.5)
+        shares = self._calculate_shares(trade)
+        if shares <= 0:
+            return
+        await self.db.execute(
+            """INSERT INTO copy_trades (market_id, outcome, leader_wallet, side, price, shares, status, created_at)
+               VALUES (:market_id, :outcome, :leader_wallet, :side, :price, :shares, 'open', NOW())""",
+            {"market_id": market_id, "outcome": outcome, "leader_wallet": wallet_address, "side": side, "price": price, "shares": shares},
+        )
+        logger.info("Copy trade executed (paper)", market_id=market_id, outcome=outcome, leader_wallet=wallet_address, side=side, shares=shares)
+
     async def check_and_execute(self) -> int:
-        """Poll followed wallets. Live execution is deliberately not implemented."""
-        return 0
+        """Poll followed wallets and execute copy trades (paper trading)."""
+        if not self._http_client:
+            return 0
+        open_count = await self._get_open_positions_count()
+        if open_count >= self.max_positions:
+            return 0
+        recent_trades = await self._fetch_recent_leader_trades()
+        executed = 0
+        for trade in recent_trades:
+            if await self._should_copy_trade(trade):
+                await self._execute_copy_trade(trade)
+                executed += 1
+                if open_count + executed >= self.max_positions:
+                    break
+        return executed

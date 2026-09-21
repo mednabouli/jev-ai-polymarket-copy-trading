@@ -16,8 +16,8 @@ WALLET_PNL = Gauge("wallet_pnl_usd", "PnL per followed wallet", ["wallet_address
 
 
 class MetricsCollector:
-    def __init__(self):
-        self.db: Database | None = None
+    def __init__(self, db: Optional[Database] = None):
+        self.db: Optional[Database] = db
         self._metrics_server_started = False
 
     async def collect(self) -> None:

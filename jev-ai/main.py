@@ -57,7 +57,7 @@ class JevAIOrchestrator:
         await self.db.initialize()
         logger.info("Database connected")
         
-        self.metrics = MetricsCollector()
+        self.metrics = MetricsCollector(db=self.db)
         logger.info("Metrics collector initialized")
         
         self.wallet_tracker = WalletTracker(

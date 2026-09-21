@@ -1,92 +1,57 @@
-"""
-Jev AI Configuration Module
-Loads environment variables and validates settings
-"""
+"""Configuration settings for Jev AI."""
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator
 from typing import Optional
-import os
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
-    
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
-    )
-    
-    # CLAUDE CODE SESSION
-    claude_code_oauth_token: str = Field(
-        default="test-session-token",
-        description="Claude Code OAuth session token"
-    )
-    
-    # TELEGRAM
-    telegram_bot_token: str = Field(
-        default="123456:test-token",
-        description="Telegram bot token"
-    )
-    
-    telegram_chat_id: str = Field(
-        default="123456789",
-        description="Telegram chat ID"
-    )
-    
-    # MCP SERVERS
-    mcp_telegram_url: str = Field(
-        default="http://localhost:8765",
-        description="Telegram MCP server URL"
-    )
-    
-    mcp_polymarket_url: str = Field(
-        default="http://localhost:8766",
-        description="Polymarket MCP server URL"
-    )
-    
-    # DATABASE
-    database_url: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/polymarket",
-        description="PostgreSQL connection string"
-    )
-    
-    # COPY TRADING RULES
-    min_trades_90d: int = Field(default=20, ge=1)
-    min_lifetime_pnl: float = Field(default=10000.0, ge=0)
-    min_win_rate: float = Field(default=0.20, ge=0.0, le=1.0)
-    max_positions: int = Field(default=10, ge=1, le=50)
-    position_size_usdc: float = Field(default=50.0, ge=1.0)
-    copy_sells: bool = Field(default=True)
-    poll_interval_secs: int = Field(default=60, ge=10)
-    
-    # POLYMARKET API
-    gamma_api_url: str = Field(default="https://gamma-api.polymarket.com")
-    gamma_requires_auth: bool = Field(default=False)
-    
-    # LOGGING
-    log_level: str = Field(default="INFO")
-    log_file: Optional[str] = Field(default=None)
-    
-    @field_validator('log_level')
+    """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # Environment
+    environment: str = Field(default="development", description="Environment: development, test, production")
+    log_level: str = Field(default="INFO", description="Logging level")
+
+    # Database
+    database_url: str = Field(default="postgresql://jev_user:jev_pass@localhost:5432/jev_ai", description="PostgreSQL connection URL")
+
+    # MCP Servers
+    mcp_polymarket_url: str = Field(default="http://localhost:8081", description="Polymarket MCP server URL")
+    mcp_telegram_url: str = Field(default="http://localhost:8082", description="Telegram MCP server URL")
+
+    # Trading Parameters
+    position_size_usdc: float = Field(default=50.0, ge=1.0, description="Position size in USDC")
+    max_positions: int = Field(default=10, ge=1, description="Maximum concurrent positions")
+    copy_sells: bool = Field(default=True, description="Whether to copy sell orders")
+    poll_interval_secs: int = Field(default=60, ge=5, description="Wallet scan interval in seconds")
+
+    # Wallet Selection Criteria
+    min_trades_90d: int = Field(default=20, ge=1, description="Minimum trades in last 90 days")
+    min_lifetime_pnl: float = Field(default=10000.0, ge=0, description="Minimum lifetime PnL in USD")
+    min_win_rate: float = Field(default=0.20, ge=0.0, le=1.0, description="Minimum win rate")
+
+    # Telegram Bot
+    telegram_bot_token: str = Field(default="", description="Telegram bot token")
+    telegram_chat_id: str = Field(default="", description="Telegram chat ID")
+
+    @field_validator("environment")
     @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-        if v.upper() not in valid_levels:
-            raise ValueError(f"log_level must be one of {valid_levels}")
-        return v.upper()
-    
-    @property
-    def is_production(self) -> bool:
-        return os.getenv('ENVIRONMENT', 'development') == 'production'
-    
-    @property
-    def debug_mode(self) -> bool:
-        return self.log_level == 'DEBUG'
+    def validate_environment(cls, v: str) -> str:
+        allowed = {"development", "test", "production"}
+        if v not in allowed:
+            raise ValueError(f"Environment must be one of {allowed}")
+        return v
+
+    @field_validator("telegram_bot_token", "telegram_chat_id")
+    @classmethod
+    def validate_telegram_required_in_prod(cls, v: str, info) -> str:
+        if info.data.get("environment") == "production" and not v:
+            raise ValueError("Telegram credentials are required in production")
+        return v
 
 
 def get_settings() -> Settings:
-    """Get settings instance - lazy instantiation to avoid validation at import time"""
+    """Get application settings instance."""
     return Settings()
