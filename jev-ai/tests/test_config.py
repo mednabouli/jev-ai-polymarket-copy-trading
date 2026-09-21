@@ -40,14 +40,14 @@ def test_settings_load_required_values(monkeypatch):
 def test_settings_reject_invalid_win_rate(monkeypatch):
     Settings = load_settings(monkeypatch, MIN_WIN_RATE="1.5")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="less_than_equal"):
         Settings()
 
 
 def test_settings_reject_invalid_log_level(monkeypatch):
     Settings = load_settings(monkeypatch, LOG_LEVEL="LOUD")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="value_error"):
         Settings()
 
 
@@ -55,4 +55,5 @@ def test_settings_detects_production(monkeypatch):
     Settings = load_settings(monkeypatch)
     monkeypatch.setenv("ENVIRONMENT", "production")
 
-    assert Settings().is_production is True
+    settings = Settings()
+    assert settings.is_production is True
