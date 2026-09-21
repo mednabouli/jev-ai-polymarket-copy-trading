@@ -1,0 +1,156 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "jev-ai-overview",
+    "title": "Jev AI - Copy Trading Overview",
+    "tags": ["copy-trading", "polymarket"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "type": "stat",
+        "title": "Followed Wallets",
+        "targets": [
+          {
+            "expr": "followed_wallets_count",
+            "legendFormat": "Wallets"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 5},
+                {"color": "green", "value": 10}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "type": "stat",
+        "title": "Open Positions",
+        "targets": [
+          {
+            "expr": "open_positions_count",
+            "legendFormat": "Positions"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 5},
+                {"color": "red", "value": 9}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "type": "stat",
+        "title": "Realized PnL",
+        "targets": [
+          {
+            "expr": "copy_trades_pnl_usd{type=\"realized\"}",
+            "legendFormat": "PnL USD"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "unit": "USD",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 0},
+                {"color": "green", "value": 100}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "type": "stat",
+        "title": "Unrealized PnL",
+        "targets": [
+          {
+            "expr": "copy_trades_pnl_usd{type=\"unrealized\"}",
+            "legendFormat": "PnL USD"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "unit": "USD",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": -50},
+                {"color": "green", "value": 50}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "type": "timeseries",
+        "title": "PnL Over Time",
+        "targets": [
+          {
+            "expr": "copy_trades_pnl_usd{type=\"realized\"}",
+            "legendFormat": "Realized"
+          },
+          {
+            "expr": "copy_trades_pnl_usd{type=\"unrealized\"}",
+            "legendFormat": "Unrealized"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "USD",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 6,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "type": "timeseries",
+        "title": "Wallets & Positions",
+        "targets": [
+          {
+            "expr": "followed_wallets_count",
+            "legendFormat": "Followed Wallets"
+          },
+          {
+            "expr": "open_positions_count",
+            "legendFormat": "Open Positions"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      }
+    ]
+  },
+  "overwrite": true
+}
