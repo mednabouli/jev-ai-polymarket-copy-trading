@@ -1,7 +1,7 @@
-"""
-Wallet Tracker Module
+"""Wallet Tracker Module
 
 Scans Polymarket for profitable wallets and maintains the followed list.
+Now integrates wallet scoring to filter out MM/arbitrage/HFT.
 """
 
 from typing import List, Dict, Any, Optional
@@ -9,6 +9,7 @@ import structlog
 import httpx
 
 from database import Database
+from strategy.wallet_scorer import WalletScorer
 
 logger = structlog.get_logger()
 
@@ -23,13 +24,16 @@ class WalletTracker:
         min_trades_90d: int = 20,
         min_lifetime_pnl: float = 10000.0,
         min_win_rate: float = 0.20,
+        min_copiability_score: int = 40,
     ):
         self.db = db
         self.mcp_url = mcp_polymarket_url
         self.min_trades_90d = min_trades_90d
         self.min_lifetime_pnl = min_lifetime_pnl
         self.min_win_rate = min_win_rate
+        self.min_copiability_score = min_copiability_score
         self._http_client: Optional[httpx.AsyncClient] = None
+        self.scorer = WalletScorer(db)
     
     async def initialize(self) -> None:
         self._http_client = httpx.AsyncClient(base_url=self.mcp_url, timeout=30.0)
@@ -68,8 +72,10 @@ class WalletTracker:
             qualified = []
             for wallet in wallets:
                 if self._wallet_qualifies(wallet):
-                    await self._store_wallet(wallet)
-                    qualified.append(wallet)
+                    score_result = await self.scorer.score_wallet(wallet.get("address"))
+                    if score_result["score"]["overall"] >= self.min_copiability_score:
+                        await self._store_wallet(wallet, score_result)
+                        qualified.append({**wallet, "score": score_result})
             return qualified
         except Exception as exc:
             logger.error("Wallet scan failed", error=str(exc))
@@ -82,15 +88,17 @@ class WalletTracker:
             and wallet.get("win_rate", 0) >= self.min_win_rate
         )
     
-    async def _store_wallet(self, wallet: Dict[str, Any]) -> None:
+    async def _store_wallet(self, wallet: Dict[str, Any], score_result: Dict[str, Any]) -> None:
         query = """
         INSERT INTO followed_wallets (
             wallet_address, wallet_name, lifetime_pnl_usd, trades_90d,
             win_rate, total_volume_usd, crypto_pnl, politics_pnl,
-            sports_pnl, other_pnl, last_updated
+            sports_pnl, other_pnl, copiability_score, recommendation,
+            is_market_maker, is_arbitrageur, is_hft, last_updated
         ) VALUES (
             :address, :name, :pnl, :trades, :win_rate, :volume,
-            :crypto_pnl, :politics_pnl, :sports_pnl, :other_pnl, NOW()
+            :crypto_pnl, :politics_pnl, :sports_pnl, :other_pnl,
+            :score, :recommendation, :is_mm, :is_arb, :is_hft, NOW()
         )
         ON CONFLICT (wallet_address) DO UPDATE SET
             wallet_name = EXCLUDED.wallet_name,
@@ -98,8 +106,16 @@ class WalletTracker:
             trades_90d = EXCLUDED.trades_90d,
             win_rate = EXCLUDED.win_rate,
             total_volume_usd = EXCLUDED.total_volume_usd,
+            copiability_score = EXCLUDED.copiability_score,
+            recommendation = EXCLUDED.recommendation,
+            is_market_maker = EXCLUDED.is_market_maker,
+            is_arbitrageur = EXCLUDED.is_arbitrageur,
+            is_hft = EXCLUDED.is_hft,
             last_updated = NOW()
         """
+        
+        flags = score_result["flags"]
+        
         await self.db.execute(query, {
             "address": wallet.get("address"),
             "name": wallet.get("name", f"Whale {wallet.get('address', '')[:8]}"),
@@ -111,9 +127,14 @@ class WalletTracker:
             "politics_pnl": wallet.get("politics_pnl", 0),
             "sports_pnl": wallet.get("sports_pnl", 0),
             "other_pnl": wallet.get("other_pnl", 0),
+            "score": score_result["score"]["overall"],
+            "recommendation": score_result["recommendation"],
+            "is_mm": flags["is_market_maker"],
+            "is_arb": flags["is_arbitrageur"],
+            "is_hft": flags["is_hft"],
         })
     
     async def get_followed_wallets(self) -> List[Dict[str, Any]]:
         return await self.db.fetch_all(
-            "SELECT * FROM followed_wallets WHERE is_active = true ORDER BY lifetime_pnl_usd DESC"
+            "SELECT * FROM followed_wallets WHERE is_active = true ORDER BY copiability_score DESC"
         )
