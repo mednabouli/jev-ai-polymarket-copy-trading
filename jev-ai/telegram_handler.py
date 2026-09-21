@@ -1,1 +1,236 @@
-"""\nTelegram Handler Module\n\nProvides Telegram bot interface for copy trading control.\nUses aiogram for async Telegram API interaction.\n"""\n\nimport asyncio\nfrom typing import Optional, Dict, Any\nfrom datetime import datetime\nimport structlog\nfrom aiogram import Bot, Dispatcher, types\nfrom aiogram.filters import Command, CommandStart\nfrom aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton\n\nfrom config import settings\nfrom database import Database\n\nlogger = structlog.get_logger()\n\n\nclass TelegramHandler:\n    """\n    Telegram bot handler for copy trading control.\n    \n    Commands:\n    - /start - Initialize bot\n    - /whales - List top profitable wallets\n    - /follow <wallet> - Follow a wallet\n    - /unfollow <wallet> - Unfollow a wallet\n    - /positions - Show open positions\n    - /pnl - Show PnL breakdown\n    - /alerts on|off - Toggle alerts\n    - /config - Show configuration\n    - /help - Show help\n    """\n    \n    def __init__(\n        self,\n        db: Database,\n        bot_token: str,\n        chat_id: str,\n        mcp_telegram_url: str,\n    ):\n        self.db = db\n        self.bot_token = bot_token\n        self.chat_id = chat_id\n        self.mcp_url = mcp_telegram_url\n        self._bot: Optional[Bot] = None\n        self._dp: Optional[Dispatcher] = None\n        self._polling_task: Optional[asyncio.Task] = None\n    \n    async def initialize(self) -> None:\n        """Initialize bot and dispatcher"""\n        self._bot = Bot(token=self.bot_token)\n        self._dp = Dispatcher()\n        \n        # Register handlers\n        self._dp.message.register(self.cmd_start, CommandStart())\n        self._dp.message.register(self.cmd_whales, Command("whales"))\n        self._dp.message.register(self.cmd_follow, Command("follow"))\n        self._dp.message.register(self.cmd_unfollow, Command("unfollow"))\n        self._dp.message.register(self.cmd_positions, Command("positions"))\n        self._dp.message.register(self.cmd_pnl, Command("pnl"))\n        self._dp.message.register(self.cmd_alerts, Command("alerts"))\n        self._dp.message.register(self.cmd_config, Command("config"))\n        self._dp.message.register(self.cmd_help, Command("help"))\n        \n        logger.info("Telegram handler initialized")\n    \n    async def close(self) -> None:\n        """Close bot"""\n        if self._polling_task:\n            self._polling_task.cancel()\n        if self._bot:\n            await self._bot.close()\n    \n    async def start_polling(self) -> None:\n        """Start polling for messages"""\n        if not self._bot or not self._dp:\n            raise RuntimeError("Telegram handler not initialized")\n        \n        logger.info("Starting Telegram polling")\n        await self._dp.start_polling(self._bot)\n    \n    async def cmd_start(self, message: Message) -> None:\n        """Handle /start command"""\n        text = f"""\n👋 **Welcome to Jev AI Copy Trading**\n\nI'm your Polymarket copy trading assistant.\n\n**Quick Commands:**\n/whales - View top profitable wallets\n/follow <wallet> - Start following a wallet\n/positions - View open copy trades\n/pnl - View PnL breakdown\n/alerts on|off - Toggle trade alerts\n/help - Show all commands\n\n**Status:**\n- Following: {await self._get_following_count()} wallets\n- Open positions: {await self._get_open_positions_count()}\n- Total PnL: ${await self._get_total_pnl():,.2f}\n        """\n        \n        await message.answer(text, parse_mode="Markdown")\n    \n    async def cmd_whales(self, message: Message) -> None:\n        """Handle /whales command - show top wallets"""\n        wallets = await self.db.fetch_all(\n            """\n            SELECT wallet_address, wallet_name, lifetime_pnl_usd,\n                   trades_90d, win_rate, is_active\n            FROM followed_wallets\n            ORDER BY lifetime_pnl_usd DESC\n            LIMIT 10\n            """\n        )\n        \n        if not wallets:\n            await message.answer("No wallets being tracked yet.")\n            return\n        \n        text = "🐋 **Top Profitable Wallets**\\n\\n"\n        for i, w in enumerate(wallets, 1):\n            status = "✅" if w["is_active"] else "❌"\n            text += (\n                f"{i}. {status} `{w['wallet_address'][:10]}...`\\n"\n                f"   PnL: ${w['lifetime_pnl_usd']:,.2f}\\n"\n                f"   Trades (90d): {w['trades_90d']}\\n"\n                f"   Win Rate: {w['win_rate']*100:.1f}%\\n\\n"\n            )\n        \n        await message.answer(text, parse_mode="Markdown")\n    \n    async def cmd_follow(self, message: Message) -> None:\n        """Handle /follow command"""\n        args = message.text.split(maxsplit=1)\n        if len(args) < 2:\n            await message.answer("Usage: /follow <wallet_address>")\n            return\n        \n        wallet_address = args[1]\n        \n        # Validate address format\n        if not wallet_address.startswith("0x") or len(wallet_address) != 42:\n            await message.answer("Invalid wallet address format.")\n            return\n        \n        # Insert or update wallet\n        await self.db.execute(\n            """\n            INSERT INTO followed_wallets (wallet_address, is_active)\n            VALUES (:address, true)\n            ON CONFLICT (wallet_address) DO UPDATE\n            SET is_active = true\n            """,\n            {"address": wallet_address}\n        )\n        \n        await message.answer(f"✅ Now following `{wallet_address}`", parse_mode="Markdown")\n        logger.info("User followed wallet", wallet=wallet_address)\n    \n    async def cmd_unfollow(self, message: Message) -> None:\n        """Handle /unfollow command"""\n        args = message.text.split(maxsplit=1)\n        if len(args) < 2:\n            await message.answer("Usage: /unfollow <wallet_address>")\n            return\n        \n        wallet_address = args[1]\n        \n        await self.db.execute(\n            """\n            UPDATE followed_wallets\n            SET is_active = false\n            WHERE wallet_address = :address\n            """,\n            {"address": wallet_address}\n        )\n        \n        await message.answer(f"❌ Stopped following `{wallet_address}`", parse_mode="Markdown")\n    \n    async def cmd_positions(self, message: Message) -> None:\n        """Handle /positions command - show open trades"""\n        positions = await self.db.fetch_all(\n            """\n            SELECT market_question, outcome, side, shares_purchased,\n                   avg_price, total_cost_usd, unrealized_pnl_usd, copied_at\n            FROM active_copy_trades\n            ORDER BY created_at DESC\n            LIMIT 10\n            """\n        )\n        \n        if not positions:\n            await message.answer("No open positions.")\n            return\n        \n        text = "📊 **Open Copy Trades**\\n\\n"\n        for pos in positions:\n            pnl_icon = "🟢" if pos["unrealized_pnl_usd"] >= 0 else "🔴"\n            text += (\n                f"{pnl_icon} **{pos['outcome']}** ({pos['side']})\\n"\n                f"   {pos['market_question'][:50]}...\\n"\n                f"   Shares: {pos['shares_purchased']:,.2f} @ {pos['avg_price']:.3f}\\n"\n                f"   Cost: ${pos['total_cost_usd']:,.2f}\\n"\n                f"   PnL: ${pos['unrealized_pnl_usd']:,.2f}\\n\\n"\n            )\n        \n        await message.answer(text, parse_mode="Markdown")\n    \n    async def cmd_pnl(self, message: Message) -> None:\n        """Handle /pnl command - show PnL breakdown"""\n        # Get realized PnL\n        realized = await self.db.fetch_one(\n            """\n            SELECT \n                COALESCE(SUM(realized_pnl_usd), 0) as total_realized,\n                COUNT(*) FILTER (WHERE realized_pnl_usd > 0) as winners,\n                COUNT(*) FILTER (WHERE realized_pnl_usd <= 0) as losers\n            FROM copy_trades\n            WHERE status = 'closed'\n            """\n        )\n        \n        # Get unrealized PnL\n        unrealized = await self.db.fetch_one(\n            """\n            SELECT COALESCE(SUM(unrealized_pnl_usd), 0) as total_unrealized\n            FROM copy_trades\n            WHERE status = 'open'\n            """\n        )\n        \n        total_realized = realized["total_realized"] if realized else 0\n        total_unrealized = unrealized["total_unrealized"] if unrealized else 0\n        winners = realized["winners"] if realized else 0\n        losers = realized["losers"] if realized else 0\n        \n        win_rate = (winners / (winners + losers) * 100) if (winners + losers) > 0 else 0\n        \n        text = f"""\n💰 **PnL Breakdown**\n\n**Realized:**\n- Total: ${total_realized:,.2f}\n- Winners: {winners}\n- Losers: {losers}\n- Win Rate: {win_rate:.1f}%\n\n**Unrealized:**\n- Total: ${total_unrealized:,.2f}\n\n**Combined:**\n- Total: ${total_realized + total_unrealized:,.2f}\n        """\n        \n        await message.answer(text, parse_mode="Markdown")\n    \n    async def cmd_alerts(self, message: Message) -> None:\n        """Handle /alerts command - toggle alerts"""\n        args = message.text.split(maxsplit=1)\n        if len(args) < 2:\n            await message.answer("Usage: /alerts on|off")\n            return\n        \n        state = args[1].lower()\n        if state not in ("on", "off"):\n            await message.answer("Usage: /alerts on|off")\n            return\n        \n        enabled = state == "on"\n        \n        await self.db.execute(\n            """\n            UPDATE alert_config\n            SET alerts_enabled = :enabled, updated_at = NOW()\n            WHERE chat_id = :chat_id\n            """,\n            {"enabled": enabled, "chat_id": self.chat_id}\n        )\n        \n        status = "✅ enabled" if enabled else "❌ disabled"\n        await message.answer(f"Trade alerts {status}")\n    \n    async def cmd_config(self, message: Message) -> None:\n        """Handle /config command - show configuration"""\n        text = f"""\n⚙️ **Configuration**\n\n- Min trades (90d): {settings.min_trades_90d}\n- Min lifetime PnL: ${settings.min_lifetime_pnl:,.0f}\n- Min win rate: {settings.min_win_rate*100:.0f}%\n- Max positions: {settings.max_positions}\n- Position size: ${settings.position_size_usdc:.0f}\n- Copy sells: {'Yes' if settings.copy_sells else 'No'}\n- Poll interval: {settings.poll_interval_secs}s\n        """\n        \n        await message.answer(text, parse_mode="Markdown")\n    \n    async def cmd_help(self, message: Message) -> None:\n        """Handle /help command"""\n        text = """\n📚 **Jev AI Copy Trading - Help**\n\n**Wallet Management:**\n/whales - View top profitable wallets\n/follow <wallet> - Start following a wallet\n/unfollow <wallet> - Stop following\n\n**Position Management:**\n/positions - View open copy trades\n/pnl - View PnL breakdown\n\n**Settings:**\n/alerts on|off - Toggle trade alerts\n/config - View configuration\n\n**Other:**\n/start - Initialize bot\n/help - Show this message\n\n**Tips:**\n- Wallet addresses must be 42 characters starting with 0x\n- Copy trades execute automatically when followed wallets trade\n- Alerts notify you of new copy trades in real-time\n        """\n        \n        await message.answer(text, parse_mode="Markdown")\n    \n    async def send_alert(self, message: str, parse_mode: str = "Markdown") -> None:\n        """Send an alert message to the configured chat"""\n        if not self._bot:\n            return\n        \n        try:\n            await self._bot.send_message(\n                chat_id=self.chat_id,\n                text=message,\n                parse_mode=parse_mode,\n            )\n        except Exception as e:\n            logger.error("Failed to send alert", error=str(e))\n    \n    async def _get_following_count(self) -> int:\n        """Get count of followed wallets"""\n        result = await self.db.fetch_one(\n            "SELECT COUNT(*) FROM followed_wallets WHERE is_active = true"\n        )\n        return result["count"] if result else 0\n    \n    async def _get_open_positions_count(self) -> int:\n        """Get count of open positions"""\n        result = await self.db.fetch_one(\n            "SELECT COUNT(*) FROM copy_trades WHERE status = 'open'"\n        )\n        return result["count"] if result else 0\n    \n    async def _get_total_pnl(self) -> float:\n        """Get total PnL (realized + unrealized)"""\n        result = await self.db.fetch_one(\n            """\n            SELECT \n                COALESCE(SUM(realized_pnl_usd), 0) +\n                COALESCE(SUM(unrealized_pnl_usd), 0) as total_pnl\n            FROM copy_trades\n            """\n        )\n        return result["total_pnl"] if result else 0\n
+"""
+Telegram Handler Module
+
+Provides Telegram bot interface for copy trading control.
+"""
+
+import asyncio
+from typing import Optional, Dict, Any
+from datetime import datetime
+import structlog
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command, CommandStart
+from aiogram.types import Message
+
+from config import settings
+from database import Database
+
+logger = structlog.get_logger()
+
+
+class TelegramHandler:
+    """Telegram bot handler for copy trading control."""
+    
+    def __init__(
+        self,
+        db: Database,
+        bot_token: str,
+        chat_id: str,
+        mcp_telegram_url: str,
+    ):
+        self.db = db
+        self.bot_token = bot_token
+        self.chat_id = chat_id
+        self.mcp_url = mcp_telegram_url
+        self._bot: Optional[Bot] = None
+        self._dp: Optional[Dispatcher] = None
+    
+    async def initialize(self) -> None:
+        """Initialize bot and dispatcher"""
+        self._bot = Bot(token=self.bot_token)
+        self._dp = Dispatcher()
+        
+        self._dp.message.register(self.cmd_start, CommandStart())
+        self._dp.message.register(self.cmd_whales, Command("whales"))
+        self._dp.message.register(self.cmd_follow, Command("follow"))
+        self._dp.message.register(self.cmd_unfollow, Command("unfollow"))
+        self._dp.message.register(self.cmd_positions, Command("positions"))
+        self._dp.message.register(self.cmd_pnl, Command("pnl"))
+        self._dp.message.register(self.cmd_alerts, Command("alerts"))
+        self._dp.message.register(self.cmd_config, Command("config"))
+        self._dp.message.register(self.cmd_help, Command("help"))
+        
+        logger.info("Telegram handler initialized")
+    
+    async def close(self) -> None:
+        """Close bot"""
+        if self._bot:
+            await self._bot.close()
+    
+    async def start_polling(self) -> None:
+        """Start polling for messages"""
+        if self._dp and self._bot:
+            await self._dp.start_polling(self._bot)
+    
+    async def cmd_start(self, message: Message) -> None:
+        """Handle /start command"""
+        text = "👋 Welcome to Jev AI Copy Trading"
+        await message.answer(text)
+    
+    async def cmd_whales(self, message: Message) -> None:
+        """Handle /whales command"""
+        wallets = await self.db.fetch_all(
+            "SELECT wallet_address, lifetime_pnl_usd, trades_90d, win_rate FROM followed_wallets ORDER BY lifetime_pnl_usd DESC LIMIT 10"
+        )
+        
+        if not wallets:
+            await message.answer("No wallets tracked yet.")
+            return
+        
+        text = "🐋 Top Profitable Wallets\n\n"
+        for i, w in enumerate(wallets, 1):
+            text += f"{i}. {w['wallet_address'][:10]}... PnL: ${w['lifetime_pnl_usd']:,.0f}\n"
+        
+        await message.answer(text)
+    
+    async def cmd_follow(self, message: Message) -> None:
+        """Handle /follow command"""
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            await message.answer("Usage: /follow <wallet_address>")
+            return
+        
+        wallet_address = args[1]
+        
+        if not wallet_address.startswith("0x") or len(wallet_address) != 42:
+            await message.answer("Invalid wallet address format.")
+            return
+        
+        await self.db.execute(
+            "INSERT INTO followed_wallets (wallet_address, is_active) VALUES (:address, true) ON CONFLICT (wallet_address) DO UPDATE SET is_active = true",
+            {"address": wallet_address}
+        )
+        
+        await message.answer(f"✅ Now following {wallet_address[:10]}...")
+    
+    async def cmd_unfollow(self, message: Message) -> None:
+        """Handle /unfollow command"""
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            await message.answer("Usage: /unfollow <wallet_address>")
+            return
+        
+        wallet_address = args[1]
+        
+        await self.db.execute(
+            "UPDATE followed_wallets SET is_active = false WHERE wallet_address = :address",
+            {"address": wallet_address}
+        )
+        
+        await message.answer(f"❌ Stopped following {wallet_address[:10]}...")
+    
+    async def cmd_positions(self, message: Message) -> None:
+        """Handle /positions command"""
+        positions = await self.db.fetch_all(
+            "SELECT market_question, outcome, side, shares_purchased, avg_price, total_cost_usd, unrealized_pnl_usd FROM copy_trades WHERE status = 'open' ORDER BY created_at DESC LIMIT 10"
+        )
+        
+        if not positions:
+            await message.answer("No open positions.")
+            return
+        
+        text = "📊 Open Copy Trades\n\n"
+        for pos in positions:
+            pnl_icon = "🟢" if pos["unrealized_pnl_usd"] >= 0 else "🔴"
+            text += f"{pnl_icon} {pos['outcome']} ({pos['side']})\n"
+            text += f"   {pos['market_question'][:50]}...\n"
+            text += f"   PnL: ${pos['unrealized_pnl_usd']:,.2f}\n\n"
+        
+        await message.answer(text)
+    
+    async def cmd_pnl(self, message: Message) -> None:
+        """Handle /pnl command"""
+        realized = await self.db.fetch_one(
+            "SELECT COALESCE(SUM(realized_pnl_usd), 0) as total FROM copy_trades WHERE status = 'closed'"
+        )
+        
+        unrealized = await self.db.fetch_one(
+            "SELECT COALESCE(SUM(unrealized_pnl_usd), 0) as total FROM copy_trades WHERE status = 'open'"
+        )
+        
+        total_realized = realized["total"] if realized else 0
+        total_unrealized = unrealized["total"] if unrealized else 0
+        
+        text = f"💰 PnL Breakdown\n\n"
+        text += f"Realized: ${total_realized:,.2f}\n"
+        text += f"Unrealized: ${total_unrealized:,.2f}\n"
+        text += f"Total: ${total_realized + total_unrealized:,.2f}\n"
+        
+        await message.answer(text)
+    
+    async def cmd_alerts(self, message: Message) -> None:
+        """Handle /alerts command"""
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            await message.answer("Usage: /alerts on|off")
+            return
+        
+        state = args[1].lower()
+        enabled = state == "on"
+        
+        await self.db.execute(
+            "UPDATE alert_config SET alerts_enabled = :enabled WHERE chat_id = :chat_id",
+            {"enabled": enabled, "chat_id": self.chat_id}
+        )
+        
+        status = "✅ enabled" if enabled else "❌ disabled"
+        await message.answer(f"Trade alerts {status}")
+    
+    async def cmd_config(self, message: Message) -> None:
+        """Handle /config command"""
+        text = f"⚙️ Configuration\n\n"
+        text += f"Min trades (90d): {settings.min_trades_90d}\n"
+        text += f"Min PnL: ${settings.min_lifetime_pnl:,.0f}\n"
+        text += f"Min win rate: {settings.min_win_rate*100:.0f}%\n"
+        text += f"Max positions: {settings.max_positions}\n"
+        text += f"Position size: ${settings.position_size_usdc:.0f}\n"
+        
+        await message.answer(text)
+    
+    async def cmd_help(self, message: Message) -> None:
+        """Handle /help command"""
+        text = "📚 Jev AI Help\n\n"
+        text += "/start - Initialize\n"
+        text += "/whales - Top wallets\n"
+        text += "/follow <addr> - Follow wallet\n"
+        text += "/unfollow <addr> - Unfollow\n"
+        text += "/positions - Open trades\n"
+        text += "/pnl - PnL breakdown\n"
+        text += "/alerts on|off - Toggle alerts\n"
+        text += "/config - Configuration\n"
+        text += "/help - This message\n"
+        
+        await message.answer(text)
+    
+    async def send_alert(self, message: str, parse_mode: str = "Markdown") -> None:
+        """Send an alert message"""
+        if self._bot:
+            try:
+                await self._bot.send_message(
+                    chat_id=self.chat_id,
+                    text=message,
+                    parse_mode=parse_mode,
+                )
+            except Exception as e:
+                logger.error("Failed to send alert", error=str(e))
+    
+    async def _get_following_count(self) -> int:
+        """Get count of followed wallets"""
+        result = await self.db.fetch_one(
+            "SELECT COUNT(*) FROM followed_wallets WHERE is_active = true"
+        )
+        return result["count"] if result else 0
+    
+    async def _get_open_positions_count(self) -> int:
+        """Get count of open positions"""
+        result = await self.db.fetch_one(
+            "SELECT COUNT(*) FROM copy_trades WHERE status = 'open'"
+        )
+        return result["count"] if result else 0
+    
+    async def _get_total_pnl(self) -> float:
+        """Get total PnL"""
+        result = await self.db.fetch_one(
+            "SELECT COALESCE(SUM(realized_pnl_usd), 0) + COALESCE(SUM(unrealized_pnl_usd), 0) as total FROM copy_trades"
+        )
+        return result["total"] if result else 0
