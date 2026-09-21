@@ -16,6 +16,8 @@ from copy_executor import CopyExecutor
 from telegram_handler import TelegramHandler
 from database import Database
 from metrics import MetricsCollector
+from ingestion.ingester import PolymarketIngester
+from ingestion.polymarket_client import PolymarketDataClient
 
 # Get settings
 settings: Settings = get_settings()
@@ -47,6 +49,7 @@ class JevAIOrchestrator:
         self.copy_executor: Optional[CopyExecutor] = None
         self.telegram_handler: Optional[TelegramHandler] = None
         self.metrics: Optional[MetricsCollector] = None
+        self.ingester: Optional[PolymarketIngester] = None
         self._shutdown_event = asyncio.Event()
         
     async def initialize(self) -> None:
@@ -59,6 +62,9 @@ class JevAIOrchestrator:
         
         self.metrics = MetricsCollector(db=self.db)
         logger.info("Metrics collector initialized")
+        
+        self.ingester = PolymarketIngester(db=self.db)
+        logger.info("Polymarket ingester initialized")
         
         self.wallet_tracker = WalletTracker(
             db=self.db,
@@ -96,6 +102,7 @@ class JevAIOrchestrator:
         logger.info("Starting orchestration loop")
         
         tasks = [
+            asyncio.create_task(self._ingestion_loop()),
             asyncio.create_task(self._wallet_tracking_loop()),
             asyncio.create_task(self._copy_execution_loop()),
             asyncio.create_task(self._metrics_loop()),
@@ -110,6 +117,39 @@ class JevAIOrchestrator:
         await asyncio.gather(*tasks, return_exceptions=True)
         
         logger.info("Orchestration loop stopped")
+    
+    async def _ingestion_loop(self) -> None:
+        """Periodically ingest data from Polymarket API."""
+        logger.info("Starting ingestion loop")
+        
+        while not self._shutdown_event.is_set():
+            try:
+                await self._run_ingestion()
+                await asyncio.sleep(300)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Ingestion error", error=str(e))
+                await asyncio.sleep(60)
+    
+    async def _run_ingestion(self) -> None:
+        """Run one ingestion cycle."""
+        wallets = await self.db.fetch_all(
+            "SELECT wallet_address FROM followed_wallets WHERE is_active = true"
+        )
+        wallet_addresses = [w["wallet_address"] for w in wallets]
+        
+        if wallet_addresses:
+            await self.ingester.ingest_wallet_trades(
+                wallet_addresses=wallet_addresses,
+                lookback_days=7,
+            )
+            await self.ingester.ingest_closed_positions(
+                wallet_addresses=wallet_addresses,
+                lookback_days=30,
+            )
+        
+        await self.ingester.ingest_leaderboard()
     
     async def _wallet_tracking_loop(self) -> None:
         """Continuously track profitable wallets"""
@@ -169,6 +209,8 @@ class JevAIOrchestrator:
         
         self._shutdown_event.set()
         
+        if self.ingester:
+            await self.ingester.close()
         if self.telegram_handler:
             await self.telegram_handler.close()
         if self.copy_executor:
