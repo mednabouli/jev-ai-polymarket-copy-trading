@@ -1,1 +1,88 @@
-"""\nDatabase Module\n\nAsync PostgreSQL access layer using asyncpg.\n"""\n\nimport asyncio\nfrom typing import List, Dict, Any, Optional, Union\nimport structlog\nimport asyncpg\n\nlogger = structlog.get_logger()\n\n\nclass Database:\n    """Async PostgreSQL database wrapper"""\n    \n    def __init__(self, connection_string: str):\n        self.connection_string = connection_string\n        self._pool: Optional[asyncpg.Pool] = None\n    \n    async def initialize(self) -> None:\n        """Create connection pool"""\n        self._pool = await asyncpg.create_pool(\n            self.connection_string,\n            min_size=2,\n            max_size=10,\n            command_timeout=60,\n        )\n        logger.info("Database pool initialized")\n    \n    async def close(self) -> None:\n        """Close connection pool"""\n        if self._pool:\n            await self._pool.close()\n            logger.info("Database pool closed")\n    \n    async def fetch_all(\n        self, query: str, values: Optional[Dict[str, Any]] = None\n    ) -> List[Dict[str, Any]]:\n        """Fetch all rows as list of dicts"""\n        async with self._pool.acquire() as conn:\n            rows = await conn.fetch(query, **values) if values else await conn.fetch(query)\n            return [dict(row) for row in rows]\n    \n    async def fetch_one(\n        self, query: str, values: Optional[Dict[str, Any]] = None\n    ) -> Optional[Dict[str, Any]]:\n        """Fetch single row as dict"""\n        async with self._pool.acquire() as conn:\n            row = await conn.fetchrow(query, **values) if values else await conn.fetchrow(query)\n            return dict(row) if row else None\n    \n    async def fetch_val(\n        self, query: str, values: Optional[Dict[str, Any]] = None, column: int = 0\n    ) -> Any:\n        """Fetch single value"""\n        async with self._pool.acquire() as conn:\n            return await conn.fetchval(query, **values) if values else await conn.fetchval(query, column=column)\n    \n    async def execute(\n        self, query: str, values: Optional[Dict[str, Any]] = None\n    ) -> str:\n        """Execute query and return status"""\n        async with self._pool.acquire() as conn:\n            return await conn.execute(query, **values) if values else await conn.execute(query)\n    \n    async def execute_many(\n        self, query: str, values: List[Dict[str, Any]]\n    ) -> None:\n        """Execute query with multiple parameter sets"""\n        async with self._pool.acquire() as conn:\n            await conn.executemany(query, values)\n    \n    async def transaction(self):\n        """Get a transaction context manager"""\n        return self._pool.acquire()\n\n\n# Global database instance (for dependency injection)\n_db: Optional[Database] = None\n\n\ndef get_database() -> Database:\n    """Get database instance"""\n    if not _db:\n        raise RuntimeError("Database not initialized")\n    return _db\n
+"""
+Database Module
+
+Async PostgreSQL access layer using asyncpg.
+"""
+
+import asyncio
+from typing import List, Dict, Any, Optional, Union
+import structlog
+import asyncpg
+
+logger = structlog.get_logger()
+
+
+class Database:
+    """Async PostgreSQL database wrapper"""
+    
+    def __init__(self, connection_string: str):
+        self.connection_string = connection_string
+        self._pool: Optional[asyncpg.Pool] = None
+    
+    async def initialize(self) -> None:
+        """Create connection pool"""
+        self._pool = await asyncpg.create_pool(
+            self.connection_string,
+            min_size=2,
+            max_size=10,
+            command_timeout=60,
+        )
+        logger.info("Database pool initialized")
+    
+    async def close(self) -> None:
+        """Close connection pool"""
+        if self._pool:
+            await self._pool.close()
+            logger.info("Database pool closed")
+    
+    async def fetch_all(
+        self, query: str, values: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Fetch all rows as list of dicts"""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, **values) if values else await conn.fetch(query)
+            return [dict(row) for row in rows]
+    
+    async def fetch_one(
+        self, query: str, values: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch single row as dict"""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(query, **values) if values else await conn.fetchrow(query)
+            return dict(row) if row else None
+    
+    async def fetch_val(
+        self, query: str, values: Optional[Dict[str, Any]] = None, column: int = 0
+    ) -> Any:
+        """Fetch single value"""
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(query, **values) if values else await conn.fetchval(query, column=column)
+    
+    async def execute(
+        self, query: str, values: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Execute query and return status"""
+        async with self._pool.acquire() as conn:
+            return await conn.execute(query, **values) if values else await conn.execute(query)
+    
+    async def execute_many(
+        self, query: str, values: List[Dict[str, Any]]
+    ) -> None:
+        """Execute query with multiple parameter sets"""
+        async with self._pool.acquire() as conn:
+            await conn.executemany(query, values)
+    
+    async def transaction(self):
+        """Get a transaction context manager"""
+        return self._pool.acquire()
+
+
+# Global database instance (for dependency injection)
+_db: Optional[Database] = None
+
+
+def get_database() -> Database:
+    """Get database instance"""
+    if not _db:
+        raise RuntimeError("Database not initialized")
+    return _db
