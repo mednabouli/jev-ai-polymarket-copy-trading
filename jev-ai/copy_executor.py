@@ -1,4 +1,8 @@
-"""Copy executor module."""
+"""Copy executor module.
+
+Executes copy trades based on followed wallet activity.
+Now integrates execution simulator for realistic paper trading.
+"""
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -6,6 +10,7 @@ import structlog
 import httpx
 
 from database import Database
+from strategy.execution_simulator import ExecutionSimulator, SimulatedFill
 
 logger = structlog.get_logger()
 
@@ -13,14 +18,30 @@ logger = structlog.get_logger()
 class CopyExecutor:
     """Executes copy trades based on followed wallet activity."""
 
-    def __init__(self, db: Database, mcp_polymarket_url: str, position_size_usdc: float = 50.0, max_positions: int = 10, copy_sells: bool = True):
+    def __init__(
+        self,
+        db: Database,
+        mcp_polymarket_url: str,
+        position_size_usdc: float = 50.0,
+        max_positions: int = 10,
+        copy_sells: bool = True,
+        max_slippage_bps: int = 500,
+        latency_seconds: float = 5.0,
+    ):
         self.db = db
         self.mcp_url = mcp_polymarket_url
         self.position_size_usdc = position_size_usdc
         self.max_positions = max_positions
         self.copy_sells = copy_sells
+        self.max_slippage_bps = max_slippage_bps
+        self.latency_seconds = latency_seconds
         self._http_client: Optional[httpx.AsyncClient] = None
         self._last_poll_time: Optional[datetime] = None
+        self.simulator = ExecutionSimulator(
+            position_size_usdc=position_size_usdc,
+            max_slippage_bps=max_slippage_bps,
+            latency_seconds=latency_seconds,
+        )
 
     async def initialize(self) -> None:
         self._http_client = httpx.AsyncClient(base_url=self.mcp_url, timeout=30.0)
@@ -77,35 +98,148 @@ class CopyExecutor:
             logger.error("Failed to fetch recent trades", error=str(exc))
             return []
 
-    async def _execute_copy_trade(self, trade: Dict[str, Any]) -> None:
-        market_id = trade.get("market_id")
-        outcome = trade.get("outcome")
-        wallet_address = trade.get("wallet_address")
-        side = trade.get("side", "BUY")
-        price = trade.get("price", 0.5)
-        shares = self._calculate_shares(trade)
-        if shares <= 0:
-            return
-        await self.db.execute(
-            """INSERT INTO copy_trades (market_id, outcome, leader_wallet, side, price, shares, status, created_at)
-               VALUES (:market_id, :outcome, :leader_wallet, :side, :price, :shares, 'open', NOW())""",
-            {"market_id": market_id, "outcome": outcome, "leader_wallet": wallet_address, "side": side, "price": price, "shares": shares},
+    async def _simulate_and_execute(
+        self,
+        trade: Dict[str, Any],
+        wallet_score: int,
+        market_liquidity: float,
+    ) -> Optional[Dict[str, Any]]:
+        """Simulate execution and insert paper trade if conditions met."""
+        
+        should_execute, reason = self.simulator.should_execute_trade(
+            wallet_score=wallet_score,
+            market_liquidity=market_liquidity,
+            signal_age_seconds=5,
         )
-        logger.info("Copy trade executed (paper)", market_id=market_id, outcome=outcome, leader_wallet=wallet_address, side=side, shares=shares)
+
+        if not should_execute:
+            logger.info(
+                "Skipping copy trade",
+                market_id=trade.get("market_id", "")[:10],
+                reason=reason,
+            )
+            return None
+
+        signal_price = trade.get("price", 0.5)
+        side = trade.get("side", "BUY")
+
+        if side == "BUY":
+            fill = self.simulator.simulate_buy(
+                market_id=trade.get("market_id"),
+                outcome=trade.get("outcome"),
+                signal_price=signal_price,
+            )
+        else:
+            position = await self._get_open_position(
+                trade.get("market_id"),
+                trade.get("outcome"),
+            )
+            if not position:
+                return None
+            fill = self.simulator.simulate_sell(
+                market_id=trade.get("market_id"),
+                outcome=trade.get("outcome"),
+                signal_price=signal_price,
+                position_size=position["shares"],
+            )
+
+        if not fill.filled:
+            logger.info(
+                "Simulation failed",
+                market_id=trade.get("market_id", "")[:10],
+                reason=fill.reason,
+            )
+            return None
+
+        trade_record = {
+            "market_id": trade.get("market_id"),
+            "outcome": trade.get("outcome"),
+            "leader_wallet": trade.get("wallet_address"),
+            "side": side,
+            "signal_price": signal_price,
+            "fill_price": fill.fill_price,
+            "shares": fill.fill_size,
+            "slippage_bps": fill.slippage_bps,
+            "fees_usdc": fill.fees_usdc,
+            "status": "open" if side == "BUY" else "closed",
+        }
+
+        await self._insert_copy_trade(trade_record)
+        
+        logger.info(
+            "Copy trade executed (paper)",
+            market_id=trade.get("market_id", "")[:10],
+            outcome=trade.get("outcome"),
+            leader_wallet=trade.get("wallet_address", "")[:10],
+            side=side,
+            shares=fill.fill_size,
+            fill_price=fill.fill_price,
+            slippage_bps=fill.slippage_bps,
+            fees_usdc=fill.fees_usdc,
+        )
+
+        return trade_record
+
+    async def _get_open_position(self, market_id: str, outcome: str) -> Optional[Dict[str, Any]]:
+        result = await self.db.fetch_one(
+            "SELECT * FROM copy_trades WHERE market_id = :market_id AND outcome = :outcome AND status = 'open' LIMIT 1",
+            {"market_id": market_id, "outcome": outcome},
+        )
+        return result
+
+    async def _insert_copy_trade(self, trade_record: Dict[str, Any]) -> None:
+        if trade_record["status"] == "open":
+            query = """
+            INSERT INTO copy_trades (
+                market_id, outcome, leader_wallet, side, signal_price,
+                fill_price, shares, slippage_bps, fees_usdc, status, created_at
+            ) VALUES (
+                :market_id, :outcome, :leader_wallet, :side, :signal_price,
+                :fill_price, :shares, :slippage_bps, :fees_usdc, 'open', NOW()
+            )
+            """
+        else:
+            query = """
+            UPDATE copy_trades SET
+                status = 'closed',
+                exit_price = :exit_price,
+                exit_slippage_bps = :exit_slippage,
+                exit_fees_usdc = :exit_fees,
+                closed_at = NOW()
+            WHERE market_id = :market_id AND outcome = :outcome AND status = 'open'
+            """
+            trade_record["exit_price"] = trade_record.pop("fill_price")
+            trade_record["exit_slippage"] = trade_record.pop("slippage_bps")
+            trade_record["exit_fees"] = trade_record.pop("fees_usdc")
+
+        await self.db.execute(query, trade_record)
 
     async def check_and_execute(self) -> int:
         """Poll followed wallets and execute copy trades (paper trading)."""
         if not self._http_client:
             return 0
+
         open_count = await self._get_open_positions_count()
         if open_count >= self.max_positions:
             return 0
+
         recent_trades = await self._fetch_recent_leader_trades()
         executed = 0
+
         for trade in recent_trades:
-            if await self._should_copy_trade(trade):
-                await self._execute_copy_trade(trade)
+            wallet_score = await self._get_wallet_score(trade.get("wallet_address"))
+            liquidity = await self._get_market_liquidity(trade.get("market_id"))
+
+            if await self._simulate_and_execute(trade, wallet_score, liquidity):
                 executed += 1
                 if open_count + executed >= self.max_positions:
                     break
+
         return executed
+
+    async def _get_wallet_score(self, wallet_address: str) -> int:
+        result = await self.db.fetch_one(
+            "SELECT copiability_score FROM followed_wallets WHERE wallet_address = :wallet LIMIT 1",
+            {"wallet": wallet_address},
+        )
+        return int(result["copiability_score"]) if result else 0
